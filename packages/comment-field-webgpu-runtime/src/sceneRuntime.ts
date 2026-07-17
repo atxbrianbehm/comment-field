@@ -20,6 +20,7 @@ import { createCardTextureFromSource } from "./cardTexture";
 import { WebGPURenderer } from "./webgpuRenderer.js";
 import { CardRasterService } from "./cardRasterService";
 import { createPerformanceTelemetry, type PerformanceTelemetryRecorder, type PerformanceTelemetrySnapshot } from "./performanceTelemetry";
+import { flipWebGpuReadback } from "./previewCache";
 
 export interface RuntimeCacheStatus {
   state: "ready" | "rebuilding";
@@ -355,13 +356,7 @@ export async function renderPreviewBlob(controller: SceneController, input: Scen
   const readbackStartedAt = performance.now();
   const pixels = await controller.renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height) as Uint8Array;
   controller.telemetry.record("gpuReadback", performance.now() - readbackStartedAt);
-  const rowBytes = width * 4;
-  const sourceStride = pixels.length % height === 0 ? pixels.length / height : rowBytes;
-  if (sourceStride < rowBytes) throw new Error("WebGPU preview readback returned an incomplete row");
-  const flipped = new Uint8ClampedArray(rowBytes * height);
-  for (let row = 0; row < height; row += 1) {
-    flipped.set(pixels.subarray(row * sourceStride, row * sourceStride + rowBytes), (height - row - 1) * rowBytes);
-  }
+  const flipped = flipWebGpuReadback(pixels, width, height);
   const canvas = controller.encodeCanvas ?? document.createElement("canvas"); controller.encodeCanvas = canvas; canvas.width = width; canvas.height = height;
   const context = canvas.getContext("2d", { alpha: false }); if (!context) throw new Error("Preview encoder is unavailable");
   context.putImageData(new ImageData(flipped, width, height), 0, 0);

@@ -63,7 +63,20 @@ export function createPreviewCacheKey(
     cardStyle,
     renderSettings,
   });
-  return `preview-${hashString(source)}-${source.length}`;
+  return `preview-v2-${hashString(source)}-${source.length}`;
+}
+
+export function flipWebGpuReadback(pixels: Uint8Array, width: number, height: number) {
+  const rowBytes = width * 4;
+  const minimumBytes = rowBytes * height;
+  if (pixels.length < minimumBytes) throw new Error("WebGPU preview readback returned incomplete pixel data");
+  const sourceStride = height <= 1 ? rowBytes : (pixels.length - rowBytes) / (height - 1);
+  if (!Number.isInteger(sourceStride) || sourceStride < rowBytes) throw new Error("WebGPU preview readback returned an invalid row stride");
+  const flipped = new Uint8ClampedArray(minimumBytes);
+  for (let row = 0; row < height; row += 1) {
+    flipped.set(pixels.subarray(row * sourceStride, row * sourceStride + rowBytes), (height - row - 1) * rowBytes);
+  }
+  return flipped;
 }
 
 export function fitPreviewDimensions(width: number, height: number, longEdge: number) {
