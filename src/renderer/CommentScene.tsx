@@ -16,10 +16,15 @@ import {
   type Take,
   type Transform,
 } from "@comment-field/engine";
-import { createCardTextureKey } from "./cardCache";
-import { createCardMaterial, type CardMaterial } from "./cardMaterial";
-import { createCardTexture } from "./cardTexture";
-import { fitFrameWithinBounds } from "./frameSizing";
+import {
+  createCardMaterial,
+  createCardTexture,
+  createCardTextureKey,
+  fitFrameWithinBounds,
+  setCardMaterialTexture,
+  WebGPURenderer,
+  type CardMaterial,
+} from "@comment-field/webgpu-runtime";
 
 export type InteractionMode = "select" | "record" | "reflow";
 export type TransformPatch = Partial<Pick<Transform, "x" | "y" | "scale" | "rotation">>;
@@ -69,7 +74,7 @@ interface CachedTexture {
 }
 
 interface SceneController {
-  renderer: THREE.WebGLRenderer;
+  renderer: WebGPURenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   cards: THREE.Group;
@@ -125,6 +130,8 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
   const mountRef = useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const controllerRef = useRef<SceneController | null>(null);
+  const [runtimeReady, setRuntimeReady] = useState(false);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
   const [selectionOverlay, setSelectionOverlay] = useState<SelectionOverlay | null>(null);
   const [fieldOverlay, setFieldOverlay] = useState<FieldOverlay | null>(null);
@@ -148,10 +155,10 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
     startRotation: number;
   } | null>(null);
   const previousAssetsRef = useRef<{ style: string; comments: string; cards: string } | null>(null);
-  const previewTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
+  const previewTargetRef = useRef<THREE.RenderTarget | null>(null);
   const encodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const render = (time: number, options: { target?: THREE.WebGLRenderTarget | null; clean?: boolean; updateOverlay?: boolean; production?: boolean } = {}) => {
+  const render = (time: number, options: { target?: THREE.RenderTarget | null; clean?: boolean; updateOverlay?: boolean; production?: boolean } = {}) => {
     const controller = controllerRef.current;
     if (!controller) return;
     const current = latestRef.current;
@@ -167,10 +174,10 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
       mesh.rotation.z = -card.rotation;
       mesh.scale.setScalar(card.scale);
       mesh.visible = card.opacity > 0.005;
-      mesh.material.uniforms.uOpacity.value = card.opacity;
-      mesh.material.uniforms.uBlur.value = card.blur;
-      mesh.material.uniforms.uSelected.value = !options.clean && current.selectedCardId === card.cardId ? 1 : 0;
-      mesh.material.uniforms.uHero.value = current.take.hero?.cardId === card.cardId ? 1 : 0;
+      mesh.material.cardUniforms.opacity.value = card.opacity;
+      mesh.material.cardUniforms.blur.value = card.blur;
+      mesh.material.cardUniforms.selected.value = !options.clean && current.selectedCardId === card.cardId ? 1 : 0;
+      mesh.material.cardUniforms.hero.value = current.take.hero?.cardId === card.cardId ? 1 : 0;
       mesh.renderOrder = card.layerPriority;
     }
     controller.renderer.setRenderTarget(options.target ?? null);
@@ -248,41 +255,57 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
 
   useEffect(() => {
     const mount = mountRef.current!;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: false });
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.setPixelRatio(PREVIEW_PIXEL_RATIO);
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 100);
-    const cards = new THREE.Group();
-    scene.add(cards);
-    const controller: SceneController = { renderer, scene, camera, cards, meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false };
-    controllerRef.current = controller;
-    mount.appendChild(renderer.domElement);
-    const resize = () => {
-      const rect = mount.getBoundingClientRect();
-      const composition = latestRef.current.composition;
-      const { width, height } = fitFrameWithinBounds(rect.width, rect.height, composition.width, composition.height);
-      controller.frameWidth = width;
-      controller.frameHeight = height;
-      setFrameSize({ width, height });
-      renderer.domElement.style.width = `${width}px`;
-      renderer.domElement.style.height = `${height}px`;
-      renderer.setSize(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)), false);
-      render(latestRef.current.time);
+    let disposed = false;
+    let observer: ResizeObserver | null = null;
+    let controller: SceneController | null = null;
+    const initialize = async () => {
+      try {
+        const renderer = new WebGPURenderer({ antialias: true, alpha: false });
+        await renderer.init();
+        if (!renderer.backend.isWebGPUBackend) throw new Error("WebGPU backend acquisition failed");
+        if (disposed) { renderer.dispose(); return; }
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.setPixelRatio(PREVIEW_PIXEL_RATIO);
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 100);
+        const cards = new THREE.Group();
+        scene.add(cards);
+        controller = { renderer, scene, camera, cards, meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false };
+        controllerRef.current = controller;
+        mount.appendChild(renderer.domElement);
+        const resize = () => {
+          if (!controller) return;
+          const rect = mount.getBoundingClientRect();
+          const composition = latestRef.current.composition;
+          const { width, height } = fitFrameWithinBounds(rect.width, rect.height, composition.width, composition.height);
+          controller.frameWidth = width;
+          controller.frameHeight = height;
+          setFrameSize({ width, height });
+          renderer.domElement.style.width = `${width}px`;
+          renderer.domElement.style.height = `${height}px`;
+          renderer.setSize(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)), false);
+          render(latestRef.current.time);
+        };
+        resizeRef.current = resize;
+        observer = new ResizeObserver(resize);
+        observer.observe(mount);
+        setRuntimeReady(true);
+        resize();
+      } catch (error) {
+        if (!disposed) setRuntimeError(error instanceof Error ? error.message : "WebGPU initialization failed");
+      }
     };
-    resizeRef.current = resize;
-    const observer = new ResizeObserver(resize);
-    observer.observe(mount);
-    resize();
+    void initialize();
     return () => {
-      observer.disconnect();
+      disposed = true;
+      observer?.disconnect();
       if (cacheFrameRef.current !== null) cancelAnimationFrame(cacheFrameRef.current);
       if (moveFrameRef.current !== null) cancelAnimationFrame(moveFrameRef.current);
       previewTargetRef.current?.dispose();
-      controller.cache.forEach(({ texture }) => texture.dispose());
-      controller.meshes.forEach((mesh) => { mesh.geometry.dispose(); mesh.material.dispose(); });
-      renderer.dispose();
-      renderer.domElement.remove();
+      controller?.cache.forEach(({ texture }) => texture.dispose());
+      controller?.meshes.forEach((mesh) => { mesh.geometry.dispose(); mesh.material.dispose(); });
+      controller?.renderer.dispose();
+      controller?.renderer.domElement.remove();
       resizeRef.current = null;
       controllerRef.current = null;
     };
@@ -317,7 +340,7 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
       if (controller.scene.background === texture) controller.scene.background = null;
       texture?.dispose();
     };
-  }, [props.composition.backgroundImage]);
+  }, [props.composition.backgroundImage, runtimeReady]);
 
   const styleSignature = JSON.stringify(props.cardStyle);
   const commentsSignature = JSON.stringify(props.comments);
@@ -393,7 +416,7 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
         if (existing) {
           existing.geometry.dispose();
           existing.geometry = geometry;
-          existing.material.uniforms.uMap.value = rendered.texture;
+          setCardMaterialTexture(existing.material, rendered.texture);
         } else {
           const material = createCardMaterial(rendered.texture);
           const mesh = new THREE.Mesh(geometry, material);
@@ -426,7 +449,7 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
         cacheFrameRef.current = null;
       }
     };
-  }, [styleSignature, commentsSignature, cardsSignature]);
+  }, [styleSignature, commentsSignature, cardsSignature, runtimeReady]);
 
   useEffect(() => { render(props.time); }, [props.time, props.take, props.entranceMotion, props.composition, props.selectedCardId, props.showTransformHandles, props.mode]);
 
@@ -467,18 +490,17 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
       let target = previewTargetRef.current;
       if (!target || target.width !== width || target.height !== height) {
         target?.dispose();
-        target = new THREE.WebGLRenderTarget(width, height, {
+        target = new THREE.RenderTarget(width, height, {
           minFilter: THREE.LinearFilter,
           magFilter: THREE.LinearFilter,
-          format: THREE.RGBAFormat,
+          type: THREE.UnsignedByteType,
           depthBuffer: true,
         });
         target.texture.colorSpace = THREE.SRGBColorSpace;
         previewTargetRef.current = target;
       }
       render(time, { target, clean: true, updateOverlay: false, production: true });
-      const pixels = new Uint8Array(width * height * 4);
-      controller.renderer.readRenderTargetPixels(target, 0, 0, width, height, pixels);
+      const pixels = await controller.renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height) as Uint8Array;
       const flipped = new Uint8ClampedArray(pixels.length);
       const rowBytes = width * 4;
       for (let row = 0; row < height; row += 1) {
@@ -699,6 +721,10 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
       onPointerCancel={pointerUp}
       onWheel={wheel}
     >
+      {!runtimeReady && <div className={`runtime-status ${runtimeError ? "is-error" : ""}`} role="status">
+        <strong>{runtimeError ? "WebGPU unavailable" : "Starting WebGPU"}</strong>
+        <span>{runtimeError ?? "Requesting a current-generation graphics device…"}</span>
+      </div>}
       {fieldOverlay && <svg className="field-map-overlay" aria-hidden="true" width={frameSize.width} height={frameSize.height} viewBox={`0 0 ${frameSize.width} ${frameSize.height}`}>
         <polygon className="field-boundary" points={fieldOverlay.field.map((point) => `${point.x},${point.y}`).join(" ")} />
         {fieldOverlay.protectedRegions.map((region) => <g key={region.id} className="safe-region-vector">

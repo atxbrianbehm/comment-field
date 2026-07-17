@@ -39,7 +39,7 @@ import {
   previewDecodeWindow,
   previewFrameIndex,
   wallClockPlaybackTime,
-} from "../renderer/previewCache";
+} from "@comment-field/webgpu-runtime";
 import { CameraWorkspace, DesignWorkspace, EntranceWorkspace, HeroWorkspace } from "./AuthoringWorkspaces";
 import { formatTimecode, KeyframeTimeline } from "./KeyframeTimeline";
 import { Field, IconButton, PanelSection, SelectField, Slider } from "./Controls";

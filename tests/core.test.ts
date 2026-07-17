@@ -32,10 +32,7 @@ import {
   type TimedKeyframe,
 } from "@comment-field/engine";
 import { exportPngSequence } from "../src/export/pngSequence";
-import { fitFrameWithinBounds } from "../src/renderer/frameSizing";
-import { createSceneAssetKey } from "../src/renderer/sceneAssetKey";
-import { createCardTextureKey } from "../src/renderer/cardCache";
-import { avatarInitialForComment } from "../src/renderer/cardTexture";
+import { avatarInitialForComment, createCardTextureKey, createSceneAssetKey, fitFrameWithinBounds } from "@comment-field/webgpu-runtime";
 import { editorPointToMotion, frameEntrancePath, motionPointToEditor } from "../src/app/motionViewport";
 import {
   choosePreviewDimensions,
@@ -43,7 +40,7 @@ import {
   previewDecodeWindow,
   previewFrameIndex,
   wallClockPlaybackTime,
-} from "../src/renderer/previewCache";
+} from "@comment-field/webgpu-runtime";
 
 describe("deterministic project core", () => {
   afterEach(() => vi.unstubAllGlobals());
