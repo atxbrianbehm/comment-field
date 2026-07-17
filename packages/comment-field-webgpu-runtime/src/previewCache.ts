@@ -107,6 +107,22 @@ export function previewFrameIndex(time: number, duration: number, frameRate: num
   return Math.min(totalFrames - 1, Math.max(0, Math.floor(time * frameRate + 0.000001)));
 }
 
+export function progressivePreviewOrder(totalFrames: number) {
+  const order: number[] = [];
+  for (let frame = 0; frame < totalFrames; frame += 2) order.push(frame);
+  for (let frame = 1; frame < totalFrames; frame += 2) order.push(frame);
+  return order;
+}
+
+export function nearestReadyPreviewFrame(frames: readonly unknown[], requested: number) {
+  if (frames[requested]) return requested;
+  for (let offset = 1; offset < frames.length; offset += 1) {
+    if (requested - offset >= 0 && frames[requested - offset]) return requested - offset;
+    if (requested + offset < frames.length && frames[requested + offset]) return requested + offset;
+  }
+  return -1;
+}
+
 export function wallClockPlaybackTime(playheadAtStart: number, startedAtMs: number, nowMs: number, duration: number) {
   return Math.min(duration, Math.max(0, playheadAtStart + (nowMs - startedAtMs) / 1000));
 }

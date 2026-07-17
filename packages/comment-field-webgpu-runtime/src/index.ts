@@ -4,6 +4,7 @@ export * from "./cardMaterial.js";
 export * from "./cardTexture";
 export * from "./frameSizing";
 export * from "./previewCache";
+export * from "./previewDecodeService";
 export * from "./performanceProfile";
 export * from "./performanceTelemetry";
 export * from "./sceneAssetKey";

@@ -73,19 +73,23 @@ export interface SceneController {
   encodeCanvas: HTMLCanvasElement | null;
   telemetry: PerformanceTelemetryRecorder;
   rasterizer: CardRasterService;
+  canvasPixelRatio: number;
+  cardTexturePixelRatio: number;
 }
 
-export async function createSceneController() {
+export async function createSceneController(options: { canvasPixelRatio?: number; cardTexturePixelRatio?: number } = {}) {
+  const canvasPixelRatio = options.canvasPixelRatio ?? 1;
+  const cardTexturePixelRatio = options.cardTexturePixelRatio ?? 2;
   const renderer = new WebGPURenderer({ antialias: true, alpha: false });
   await renderer.init();
   if (!renderer.backend.isWebGPUBackend) throw new Error("WebGPU backend acquisition failed");
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setPixelRatio(1);
+  renderer.setPixelRatio(canvasPixelRatio);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 100);
   const cards = new THREE.Group();
   scene.add(cards);
-  return { renderer, scene, camera, cards, meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null, telemetry: createPerformanceTelemetry(), rasterizer: new CardRasterService() } satisfies SceneController;
+  return { renderer, scene, camera, cards, meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null, telemetry: createPerformanceTelemetry(), rasterizer: new CardRasterService(), canvasPixelRatio, cardTexturePixelRatio } satisfies SceneController;
 }
 
 export function getSceneTelemetry(controller: SceneController): PerformanceTelemetrySnapshot {
@@ -106,6 +110,7 @@ export function resizeScene(controller: SceneController, width: number, height: 
   controller.frameHeight = height;
   controller.renderer.domElement.style.width = `${width}px`;
   controller.renderer.domElement.style.height = `${height}px`;
+  controller.renderer.setPixelRatio(controller.exporting ? 1 : controller.canvasPixelRatio);
   controller.renderer.setSize(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)), false);
 }
 
@@ -307,7 +312,7 @@ export function syncSceneAssets(controller: SceneController, input: Pick<SceneRe
       if (!comment) return;
       const key = createCardTextureKey(comment, input.cardStyle);
       const rasterStartedAt = performance.now();
-      const raster = await controller.rasterizer.rasterize(comment, input.cardStyle, 2);
+      const raster = await controller.rasterizer.rasterize(comment, input.cardStyle, controller.cardTexturePixelRatio);
       controller.telemetry.record("textureRaster", performance.now() - rasterStartedAt);
       if (cancelled) { raster.dispose(); return; }
       const rendered = createCardTextureFromSource(raster.source, raster.width, raster.height);

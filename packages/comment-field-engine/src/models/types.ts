@@ -198,6 +198,7 @@ export interface PreviewCacheStatus {
   key: string;
   reason: string;
   playbackMode: "live" | "cached";
+  decoderBackend?: string;
 }
 
 export interface BuildPerformance {

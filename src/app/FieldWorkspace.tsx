@@ -129,6 +129,7 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             <div>
               <span>{cacheStatus.hits} texture hits · {cacheStatus.misses} misses</span>
               <span>{previewStatus.frameRate || composition.frameRate} fps · {previewMemory}</span>
+              <span>Decode · {previewStatus.decoderBackend ?? "pending"}</span>
               {telemetry && <span>Render {telemetry.sceneRender.averageMs.toFixed(1)} ms · Readback {telemetry.gpuReadback.averageMs.toFixed(1)} ms · Encode {telemetry.frameEncode.averageMs.toFixed(1)} ms</span>}
               <code>{previewStatus.key.slice(0, 24) || "no preview key"}</code>
               <strong>{previewStatus.reason}</strong>

@@ -41,7 +41,7 @@ export function selectPerformanceProfile(capabilities: PerformanceCapabilities):
     };
   }
   return {
-    class: "desktop", canvasPixelRatio: Math.min(2, dpr), cardTexturePixelRatio: 2,
+    class: "desktop", canvasPixelRatio: Math.min(1.5, dpr), cardTexturePixelRatio: 2,
     previewLongEdges: [...DEFAULT_PREVIEW_CACHE_SETTINGS.proxyLongEdges],
     previewMemoryBudgetBytes: DEFAULT_PREVIEW_CACHE_SETTINGS.memoryBudgetBytes,
     previewFrameRate: 24, draftFrameRate: 12, blurQuality: "full",

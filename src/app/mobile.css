@@ -60,8 +60,18 @@
   .transport .take-controls { display: none; }
   .timecode { font-size: 10px; }
   .timecode span { display: none; }
-  .timeline-toolbar { display: none; }
+  .dopesheet-toolbar { display: none; }
   .timeline-shell { min-width: 0; }
+  .dopesheet-body { height: 52px; }
+  .dopesheet-ruler { height: 52px; }
+  .dopesheet-ruler span { height: 52px; padding-top: 16px; }
+  .dopesheet-ruler span i { top: 33px; height: 19px; }
+  .preview-cache-fill { top: 49px; }
+  .shot-outpoint { width: 48px; translate: -24px 0; }
+  .shot-outpoint::before { left: 23px; }
+  .shot-outpoint i { left: 16px; }
+  .key-diamond { width: 48px; height: 48px; }
+  .key-diamond::before { left: 18px; top: 18px; }
 
   .authoring-workspace { grid-column: 1; grid-row: 2; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(42dvh, 1fr) minmax(180px, 42dvh); }
   .authoring-canvas { min-height: 0; }

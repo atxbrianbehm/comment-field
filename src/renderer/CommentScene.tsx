@@ -34,6 +34,7 @@ import {
   renderPreviewBlob,
   renderScene,
   resizeScene,
+  selectPerformanceProfile,
   setSceneBackground,
   syncSceneAssets,
   type RuntimeCacheStatus,
@@ -131,7 +132,12 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
     let disposed = false;
     let observer: ResizeObserver | null = null;
     let controller: SceneController | null = null;
-    void createSceneController().then((created) => {
+    const profile = selectPerformanceProfile({
+      viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+      deviceMemoryGb: (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    });
+    void createSceneController({ canvasPixelRatio: profile.canvasPixelRatio, cardTexturePixelRatio: profile.cardTexturePixelRatio }).then((created) => {
       if (disposed) { disposeSceneController(created); return; }
       controller = created;
       controllerRef.current = created;

@@ -36,6 +36,8 @@ import { editorPointToMotion, frameEntrancePath, motionPointToEditor } from "../
 import {
   choosePreviewDimensions,
   createPreviewCacheKey,
+  nearestReadyPreviewFrame,
+  progressivePreviewOrder,
   previewDecodeWindow,
   previewFrameIndex,
   wallClockPlaybackTime,
@@ -475,6 +477,15 @@ describe("deterministic project core", () => {
     expect(window.last).toBeGreaterThan(30);
     expect(wallClockPlaybackTime(0, 1_000, 9_000, 8)).toBe(8);
     expect(wallClockPlaybackTime(2, 1_000, 4_000, 8)).toBe(5);
+  });
+
+  it("builds a playable draft pass before refining exact 24 fps frames", () => {
+    const order = progressivePreviewOrder(8);
+    expect(order).toEqual([0, 2, 4, 6, 1, 3, 5, 7]);
+    const sparse = [new Blob(), null, new Blob(), null, new Blob()];
+    expect(nearestReadyPreviewFrame(sparse, 3)).toBe(2);
+    expect(nearestReadyPreviewFrame(sparse, 1)).toBe(0);
+    expect(nearestReadyPreviewFrame([null, null], 1)).toBe(-1);
   });
 
 });
