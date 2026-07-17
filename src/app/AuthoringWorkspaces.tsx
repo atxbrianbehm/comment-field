@@ -183,7 +183,7 @@ export function EntranceWorkspace({
           <Slider label="Drift speed" min={0} max={0.5} step={0.01} value={motion.driftSpeed} display={`${motion.driftSpeed.toFixed(2)} Hz`} onChange={(event) => onMotionChange({ ...motion, driftSpeed: Number(event.target.value) })} />
           <Slider label="Rotation drift" min={0} max={0.06} step={0.001} value={motion.driftRotation} display={`${(motion.driftRotation * 57.2958).toFixed(2)}°`} onChange={(event) => onMotionChange({ ...motion, driftRotation: Number(event.target.value) })} />
         </PanelSection>
-        <PanelSection title="Timing curve">
+        <PanelSection title="Transform curve" meta="Motion · scale · blur">
           <CurveEditor curve={motion.easing} onChange={(easing) => onMotionChange({ ...motion, easing })} />
           <div className="curve-presets">
             <button onClick={() => onMotionChange({ ...motion, easing: { x1: 0, y1: 0, x2: 1, y2: 1 } })}>Linear</button>

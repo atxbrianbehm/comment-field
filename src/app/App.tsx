@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Camera, CheckCheck, CircleDot, Clapperboard, Copy, Download, FileUp, Heart, ImagePlus, Layers3, Lock,
+  Camera, CheckCheck, CircleDot, CircleHelp, Clapperboard, Copy, Download, FileUp, Heart, ImagePlus, Layers3, Lock,
   MousePointer2, Move3d, Palette, Pause, Play, Plus, RefreshCw, Save, Shield, Sparkles, Star,
   Trash2, Unlock, WandSparkles,
 } from "lucide-react";
@@ -28,6 +28,8 @@ import {
 import { CameraWorkspace, DesignWorkspace, EntranceWorkspace, HeroWorkspace } from "./AuthoringWorkspaces";
 import { formatTimecode, KeyframeTimeline } from "./KeyframeTimeline";
 import { Field, IconButton, PanelSection, SelectField, Slider } from "./Controls";
+import { CurveEditor } from "./MotionEditors";
+import { HelpOverlay } from "./HelpOverlay";
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const makeId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
@@ -64,6 +66,7 @@ export function App() {
   const [fieldView, setFieldView] = useState<"camera" | "overview">("camera");
   const [rightTab, setRightTab] = useState<"layout" | "build" | "hero">("layout");
   const [autoKey, setAutoKey] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [commentSource, setCommentSource] = useState(DEFAULT_COMMENT_TEXT);
   const [notice, setNotice] = useState("Ready");
   const [exportScale, setExportScale] = useState(0.5);
@@ -776,6 +779,16 @@ export function App() {
           <button className="secondary-button wide" onClick={randomizeBuild}><Sparkles size={16} />Randomize triggers</button>
           <button className={`record-button wide ${mode === "record" ? "is-recording" : ""}`} onClick={() => { setMode(mode === "record" ? "select" : "record"); pausePlayback(); }}><CircleDot size={16} />{mode === "record" ? "Recording: draw in viewer" : "Record mouse build"}</button>
         </PanelSection><PanelSection title="Take notes"><textarea className="take-notes" value={take.notes ?? ""} placeholder="Timing notes, alternates, review flags…" onChange={(event) => mutateTake((draft) => { draft.notes = event.target.value; })} /></PanelSection></>}
+        {rightTab === "build" && <PanelSection title="Opacity curve" meta="Shared globally">
+          <p className="panel-explainer">Shape the fade independently from position, scale, rotation, depth, and blur.</p>
+          <Slider label="Fade amount" min={0} max={1} step={0.01} value={project.entranceMotion.fade} display={`${Math.round(project.entranceMotion.fade * 100)}%`} onChange={(event) => mutateProject((draft) => { draft.entranceMotion.fade = Number(event.target.value); })} />
+          <CurveEditor curve={project.entranceMotion.opacityEasing} onChange={(opacityEasing) => mutateProject((draft) => { draft.entranceMotion.opacityEasing = opacityEasing; })} />
+          <div className="curve-presets">
+            <button onClick={() => mutateProject((draft) => { draft.entranceMotion.opacityEasing = { x1: 0, y1: 0, x2: 1, y2: 1 }; })}>Linear</button>
+            <button onClick={() => mutateProject((draft) => { draft.entranceMotion.opacityEasing = { x1: 0.42, y1: 0, x2: 1, y2: 1 }; })}>Ease in</button>
+            <button onClick={() => mutateProject((draft) => { draft.entranceMotion.opacityEasing = { x1: 0.16, y1: 1, x2: 0.3, y2: 1 }; })}>Ease out</button>
+          </div>
+        </PanelSection>}
         {rightTab === "hero" && <PanelSection title="Hero transition" meta={take.hero ? project.comments.find((item) => item.id === take.hero?.cardId)?.handle : "Not set"}>
           {!take.hero ? <div className="empty-hero"><Heart size={24} /><p>Select an eligible post, then choose <strong>Make hero</strong>.</p></div> : <>
             <p className="selected-copy">The active hero is rendered above every ordinary post.</p>
@@ -803,6 +816,7 @@ export function App() {
         </div>
         <div className="topbar-actions">
           <span className="save-status"><CircleDot size={12} />{notice}</span>
+          <IconButton label="Open help" onClick={() => setHelpOpen(true)}><CircleHelp size={18} /></IconButton>
           <IconButton label="Save project JSON" onClick={saveJson}><Save size={18} /></IconButton>
           <label className="icon-button" title="Load project JSON"><FileUp size={18} /><input hidden type="file" accept="application/json,.json" onChange={(event) => event.target.files?.[0] && loadJson(event.target.files[0])} /></label>
           <select className="export-scale" value={exportScale} onChange={(event) => setExportScale(Number(event.target.value))} aria-label="Export scale"><option value={0.25}>¼ res</option><option value={0.5}>½ res</option><option value={1}>Full res</option></select>
@@ -870,6 +884,7 @@ export function App() {
           <IconButton label="Delete take" onClick={deleteTake}><Trash2 size={16} /></IconButton>
         </div>
       </footer>
+      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
     </main>
   );
 }

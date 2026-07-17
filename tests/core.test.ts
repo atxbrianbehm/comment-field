@@ -246,6 +246,20 @@ describe("deterministic project core", () => {
     expect(samples.map((sample) => sample.blur)).toEqual([...samples.map((sample) => sample.blur)].sort((a, b) => b - a));
   });
 
+  it("evaluates opacity from its own curve without changing transform motion", () => {
+    const project = createDefaultProject();
+    const base = { ...project.entranceMotion, driftAmount: 0, driftRotation: 0 };
+    const slowOpacity = { ...base, opacityEasing: { x1: 0.42, y1: 0, x2: 1, y2: 1 } };
+    const fastOpacity = { ...base, opacityEasing: { x1: 0, y1: 1, x2: 0.3, y2: 1 } };
+    const slow = evaluateEntranceComponents(slowOpacity, 0.35, 0.35, "seed", "card");
+    const fast = evaluateEntranceComponents(fastOpacity, 0.35, 0.35, "seed", "card");
+    expect(fast.opacity).toBeGreaterThan(slow.opacity);
+    expect(fast.position).toEqual(slow.position);
+    expect(fast.scale).toBe(slow.scale);
+    expect(fast.rotation).toBe(slow.rotation);
+    expect(fast.blur).toBe(slow.blur);
+  });
+
   it("generates deterministic card-specific ambient drift and disables it cleanly", () => {
     const project = createDefaultProject();
     const motion = project.entranceMotion;
@@ -442,7 +456,7 @@ describe("deterministic project core", () => {
     delete (legacy.cardStyle as Partial<typeof legacy.cardStyle>).showHandle;
     delete (legacy.cardStyle as Partial<typeof legacy.cardStyle>).showTimestamp;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(6);
+    expect(restored.version).toBe(7);
     expect(restored.cardStyle.strokeWidth).toBe(0);
     expect(restored.cardStyle.strokeColor).toBe("#1B1B18");
     expect(restored.cardStyle.showAvatar).toBe(true);
@@ -462,7 +476,7 @@ describe("deterministic project core", () => {
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).driftSpeed;
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).driftRotation;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(6);
+    expect(restored.version).toBe(7);
     expect(restored.entranceMotion).toMatchObject({
       springAmount: 0,
       springBounces: 0,
@@ -479,7 +493,7 @@ describe("deterministic project core", () => {
     for (const composition of legacy.compositions) delete (composition as Partial<typeof composition>).fieldBounds;
     for (const take of legacy.takes) delete (take as Partial<typeof take>).cameraKeyframes;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(6);
+    expect(restored.version).toBe(7);
     expect(restored.compositions.every((composition) => composition.fieldBounds.width === 1 && composition.fieldBounds.height === 1)).toBe(true);
     expect(restored.takes.every((take) => take.cameraKeyframes.length === 0)).toBe(true);
     expect(evaluateCamera(restored.compositions[0], restored.takes[0], 3)).toEqual(restored.compositions[0].camera);
@@ -503,10 +517,20 @@ describe("deterministic project core", () => {
       reflowDuration: 1.1, easing: "ease-out", reflowEasing: "ease-out",
     };
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(6);
+    expect(restored.version).toBe(7);
     expect(restored.takes.every((candidate) => candidate.duration === 12)).toBe(true);
     expect(restored.compositions.every((composition) => !("duration" in composition))).toBe(true);
     expect(restored.takes[0].hero?.keyframes).toHaveLength(2);
     expect(restored.takes[0].hero?.keyframes?.map((keyframe) => keyframe.time)).toEqual([3, 4.5]);
+  });
+
+  it("migrates schema-v6 opacity onto the legacy transform curve", () => {
+    const legacy = createDefaultProject();
+    legacy.version = 6;
+    legacy.entranceMotion.easing = { x1: 0.65, y1: 0, x2: 0.35, y2: 1 };
+    delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).opacityEasing;
+    const restored = deserializeProject(JSON.stringify(legacy));
+    expect(restored.version).toBe(7);
+    expect(restored.entranceMotion.opacityEasing).toEqual(restored.entranceMotion.easing);
   });
 });

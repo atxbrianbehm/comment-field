@@ -71,6 +71,10 @@ export function migrateProject(project: Project): Project {
   } else {
     migrated.entranceMotion ??= structuredClone(DEFAULT_ENTRANCE_MOTION);
   }
+  migrated.entranceMotion.opacityEasing ??= structuredClone(migrated.entranceMotion.easing);
+  for (const take of migrated.takes) {
+    if (take.entranceOverride) take.entranceOverride.opacityEasing ??= structuredClone(take.entranceOverride.easing);
+  }
   if (legacyVersion < 4) {
     const preserveLegacyMotion = (motion: Project["entranceMotion"]) => {
       motion.springAmount = 0;

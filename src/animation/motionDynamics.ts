@@ -54,6 +54,7 @@ export function evaluateEntranceComponents(
 ) {
   const clampedProgress = clamp(rawProgress);
   const easedProgress = evaluateBezierCurve(motion.easing, clampedProgress);
+  const opacityProgress = evaluateBezierCurve(motion.opacityEasing, clampedProgress);
   const springOffset = evaluateSpringOffset(rawProgress, motion);
   const transformProgress = easedProgress + springOffset;
   const pathOffset = evaluateSpatialPath(motion.path, easedProgress);
@@ -74,7 +75,7 @@ export function evaluateEntranceComponents(
     scale: lerp(motion.scaleFrom, 1, transformProgress),
     rotation: lerp(motion.rotationOffset, 0, transformProgress) + drift.rotation,
     depth: lerp(motion.depthOffset, 0, transformProgress),
-    opacity: lerp(1 - motion.fade, 1, easedProgress),
+    opacity: lerp(1 - motion.fade, 1, opacityProgress),
     blur: lerp(motion.blur, 0, easedProgress),
   };
 }

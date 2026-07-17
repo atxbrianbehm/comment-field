@@ -42,6 +42,7 @@ export const DEFAULT_ENTRANCE_MOTION: EntranceMotionTemplate = {
     control2: { x: 0, y: 0.025 },
   },
   easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
+  opacityEasing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
 };
 
 export const DEFAULT_SCATTER: ScatterSettings = {

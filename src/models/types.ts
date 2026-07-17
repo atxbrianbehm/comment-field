@@ -1,4 +1,4 @@
-export const PROJECT_VERSION = 6;
+export const PROJECT_VERSION = 7;
 
 export interface CommentRecord {
   id: string;
@@ -165,6 +165,7 @@ export interface EntranceMotionTemplate extends SpringMotionSettings, AmbientDri
   depthOffset: number;
   path: SpatialBezierPath;
   easing: CubicBezierCurve;
+  opacityEasing: CubicBezierCurve;
 }
 
 export interface PreviewCacheSettings {
