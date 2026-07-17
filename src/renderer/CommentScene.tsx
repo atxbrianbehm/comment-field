@@ -97,6 +97,8 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
   const assetJobRef = useRef<{ cancel: () => void } | null>(null);
   const dragRef = useRef<{ cardId: string; offsetX: number; offsetY: number; z: number } | null>(null);
   const overviewPanRef = useRef<{ pointer: { x: number; y: number }; camera: CameraPose } | null>(null);
+  const activePointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ distance: number; midpoint: { x: number; y: number } } | null>(null);
   const gestureRef = useRef<{ start: number; samples: GestureSample[] } | null>(null);
   const pendingMoveRef = useRef<{ cardId: string; patch: TransformPatch; editReflow: boolean } | null>(null);
   const moveFrameRef = useRef<number | null>(null);
@@ -251,7 +253,18 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
     const controller = controllerRef.current;
     if (!controller) return;
     event.currentTarget.setPointerCapture(event.pointerId);
+    activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     const current = latestRef.current;
+    if (activePointersRef.current.size >= 2 && (current.viewMode ?? "camera") === "overview") {
+      const points = [...activePointersRef.current.values()].slice(0, 2);
+      pinchRef.current = {
+        distance: Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y),
+        midpoint: { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 },
+      };
+      dragRef.current = null; overviewPanRef.current = null; manipulationRef.current = null;
+      current.onManipulationStart?.();
+      return;
+    }
     const point = normalizedCanvasPoint(controller, event.clientX, event.clientY);
     if (current.mode === "record") { gestureRef.current = { start: performance.now(), samples: [{ time: 0, ...point }] }; return; }
     const cardId = hitTestCard(controller, event.clientX, event.clientY) ?? null;
@@ -277,6 +290,22 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
   function pointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const controller = controllerRef.current;
     if (!controller) return;
+    if (activePointersRef.current.has(event.pointerId)) activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pinchRef.current && activePointersRef.current.size >= 2) {
+      const points = [...activePointersRef.current.values()].slice(0, 2);
+      const distance = Math.max(1, Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y));
+      const midpoint = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+      const dimensions = compositionWorldDimensions(latestRef.current.composition);
+      const zoom = overviewCameraRef.current.z / fittedOverviewCamera(latestRef.current.composition).z;
+      overviewCameraRef.current = {
+        ...overviewCameraRef.current,
+        x: overviewCameraRef.current.x - (midpoint.x - pinchRef.current.midpoint.x) / Math.max(1, frameSize.width) * dimensions.width * zoom,
+        y: overviewCameraRef.current.y + (midpoint.y - pinchRef.current.midpoint.y) / Math.max(1, frameSize.height) * dimensions.height * zoom,
+        z: clamp(overviewCameraRef.current.z * pinchRef.current.distance / distance, 2, 60),
+      };
+      pinchRef.current = { distance, midpoint };
+      paint(); return;
+    }
     const manipulation = manipulationRef.current;
     if (manipulation) {
       const rect = controller.renderer.domElement.getBoundingClientRect();
@@ -315,7 +344,9 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
     }
   }
 
-  function pointerUp() {
+  function pointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    activePointersRef.current.delete(event.pointerId);
+    if (activePointersRef.current.size < 2) pinchRef.current = null;
     if (gestureRef.current) latestRef.current.onGestureComplete(gestureRef.current.samples);
     if (moveFrameRef.current !== null) cancelAnimationFrame(moveFrameRef.current);
     moveFrameRef.current = null; flushPendingMove(); gestureRef.current = null; dragRef.current = null;
@@ -353,8 +384,8 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
     <canvas ref={previewCanvasRef} className="ram-preview-canvas" aria-label="Cached playback preview" style={{ width: frameSize.width, height: frameSize.height }} />
     {selectionOverlay && <svg className={`transform-overlay ${selectionOverlay.locked ? "is-locked" : ""}`} width={frameSize.width} height={frameSize.height} viewBox={`0 0 ${frameSize.width} ${frameSize.height}`}>
       <polygon points={selectionOverlay.points.map((point) => `${point.x},${point.y}`).join(" ")} /><line x1={selectionOverlay.center.x} y1={selectionOverlay.center.y} x2={selectionOverlay.rotationHandle.x} y2={selectionOverlay.rotationHandle.y} />
-      {selectionOverlay.points.map((point, index) => <g key={index} className="transform-handle scale-handle" transform={`translate(${point.x} ${point.y})`} onPointerDown={(event) => beginHandleManipulation("scale", event)}><circle className="transform-hit" r="20" /><rect x="-6" y="-6" width="12" height="12" rx="3" /></g>)}
-      <g className="transform-handle rotate-handle" transform={`translate(${selectionOverlay.rotationHandle.x} ${selectionOverlay.rotationHandle.y})`} onPointerDown={(event) => beginHandleManipulation("rotate", event)}><circle className="transform-hit" r="20" /><circle r="7" /></g>
+      {selectionOverlay.points.map((point, index) => <g key={index} className="transform-handle scale-handle" transform={`translate(${point.x} ${point.y})`} onPointerDown={(event) => beginHandleManipulation("scale", event)}><circle className="transform-hit" r="24" /><rect x="-6" y="-6" width="12" height="12" rx="3" /></g>)}
+      <g className="transform-handle rotate-handle" transform={`translate(${selectionOverlay.rotationHandle.x} ${selectionOverlay.rotationHandle.y})`} onPointerDown={(event) => beginHandleManipulation("rotate", event)}><circle className="transform-hit" r="24" /><circle r="7" /></g>
       {selectionOverlay.locked && <text x={selectionOverlay.center.x} y={selectionOverlay.center.y}>Locked</text>}
     </svg>}
   </div>;

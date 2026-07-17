@@ -3,6 +3,7 @@ import {
   Camera, CircleDot, Clapperboard, FileUp, Heart, ImagePlus, Layers3, Lock, MousePointer2,
   Move3d, Palette, RefreshCw, Shield, Sparkles, Trash2, Unlock, WandSparkles,
 } from "lucide-react";
+import { useState } from "react";
 import type {
   BuildOrder, CardPlacement, CommentRecord, Composition, GestureSample, ParseResult, PreviewCacheStatus, Project, Take,
 } from "@comment-field/engine";
@@ -69,6 +70,7 @@ interface FieldWorkspaceProps {
 }
 
 export function FieldWorkspace(props: FieldWorkspaceProps) {
+  const [mobilePanel, setMobilePanel] = useState<"closed" | "comments" | "controls">("closed");
   const {
     project, composition, take, duration, time, playing, commentSource, commentPreview, selectedCardId,
     selectedPlacement, selectedComment, mode, fieldView, rightTab, cacheStatus, previewStatus, previewLabel,
@@ -81,7 +83,14 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
   const telemetry = sceneRef.current?.getPerformanceTelemetry();
   return (
     <>
-      <aside className="left-panel panel-scroll">
+      <nav className="mobile-context-nav" aria-label="Mobile field panels">
+        <button className={mobilePanel === "closed" ? "is-active" : ""} onClick={() => setMobilePanel("closed")}>Stage</button>
+        <button className={mobilePanel === "comments" ? "is-active" : ""} onClick={() => setMobilePanel("comments")}>Comments</button>
+        <button className={mobilePanel === "controls" ? "is-active" : ""} onClick={() => setMobilePanel("controls")}>Controls</button>
+      </nav>
+      {mobilePanel !== "closed" && <button className="mobile-sheet-backdrop" aria-label="Close mobile panel" onClick={() => setMobilePanel("closed")} />}
+      <aside className={`left-panel panel-scroll mobile-sheet ${mobilePanel === "comments" ? "is-open" : ""}`}>
+        <button className="mobile-sheet-close" onClick={() => setMobilePanel("closed")}><span />Close</button>
         <PanelSection title="Comments" meta={`${project.comments.length} cards`}>
           <textarea className="comments-source" value={commentSource} onChange={(event) => setCommentSource(event.target.value)} spellCheck={false} />
           <div className="parse-preview"><span>{commentPreview.records.length} valid</span><span>{commentPreview.errors.length} malformed</span></div>
@@ -142,7 +151,8 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
         </div>
       </section>
 
-      <aside className="right-panel panel-scroll">
+      <aside className={`right-panel panel-scroll mobile-sheet ${mobilePanel === "controls" ? "is-open" : ""}`}>
+        <button className="mobile-sheet-close" onClick={() => setMobilePanel("closed")}><span />Close</button>
         <div className="panel-tabs"><button className={rightTab === "layout" ? "is-active" : ""} onClick={() => setRightTab("layout")}>Layout</button><button className={rightTab === "build" ? "is-active" : ""} onClick={() => setRightTab("build")}>Build</button><button className={rightTab === "hero" ? "is-active" : ""} onClick={() => setRightTab("hero")}>Hero</button></div>
         {rightTab === "layout" && <>
           <PanelSection title="Scatter field" meta="Deterministic">

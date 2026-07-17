@@ -16,8 +16,9 @@ import {
 } from "@comment-field/engine";
 import { createCardTextureKey } from "./cardCache";
 import { createCardMaterial, setCardMaterialTexture, type CardMaterial } from "./cardMaterial.js";
-import { createCardTexture } from "./cardTexture";
+import { createCardTextureFromSource } from "./cardTexture";
 import { WebGPURenderer } from "./webgpuRenderer.js";
+import { CardRasterService } from "./cardRasterService";
 import { createPerformanceTelemetry, type PerformanceTelemetryRecorder, type PerformanceTelemetrySnapshot } from "./performanceTelemetry";
 
 export interface RuntimeCacheStatus {
@@ -71,6 +72,7 @@ export interface SceneController {
   previewTarget: THREE.RenderTarget | null;
   encodeCanvas: HTMLCanvasElement | null;
   telemetry: PerformanceTelemetryRecorder;
+  rasterizer: CardRasterService;
 }
 
 export async function createSceneController() {
@@ -83,7 +85,7 @@ export async function createSceneController() {
   const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 100);
   const cards = new THREE.Group();
   scene.add(cards);
-  return { renderer, scene, camera, cards, meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null, telemetry: createPerformanceTelemetry() } satisfies SceneController;
+  return { renderer, scene, camera, cards, meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null, telemetry: createPerformanceTelemetry(), rasterizer: new CardRasterService() } satisfies SceneController;
 }
 
 export function getSceneTelemetry(controller: SceneController): PerformanceTelemetrySnapshot {
@@ -92,6 +94,7 @@ export function getSceneTelemetry(controller: SceneController): PerformanceTelem
 
 export function disposeSceneController(controller: SceneController) {
   controller.previewTarget?.dispose();
+  controller.rasterizer.dispose();
   controller.cache.forEach(({ texture }) => texture.dispose());
   controller.meshes.forEach((mesh) => { mesh.geometry.dispose(); mesh.material.dispose(); });
   controller.renderer.dispose();
@@ -216,25 +219,32 @@ export function renderScene(controller: SceneController, input: SceneRenderInput
     mesh.rotation.z = -card.rotation;
     mesh.scale.setScalar(card.scale);
     mesh.visible = card.opacity > 0.005;
-    mesh.material.cardUniforms.opacity.value = card.opacity;
-    mesh.material.cardUniforms.blur.value = card.blur;
-    mesh.material.cardUniforms.selected.value = !options.clean && input.selectedCardId === card.cardId ? 1 : 0;
-    mesh.material.cardUniforms.hero.value = input.take.hero?.cardId === card.cardId ? 1 : 0;
     const previous = previousCards.get(card.cardId);
+    let motionX = 0;
+    let motionY = 0;
+    let motionAmount = 0;
     if (previous && input.viewMode !== "overview") {
       const currentWorld = fieldPointToWorld(input.composition, card);
       const previousWorld = fieldPointToWorld(input.composition, previous);
       const currentScreen = projectWorldPoint(input.composition, state.camera, { ...currentWorld, z: card.z });
       const previousScreen = projectWorldPoint(input.composition, previousState!.camera, { ...previousWorld, z: previous.z });
       const strength = motionBlur.strength;
-      mesh.material.cardUniforms.motionX.value = THREE.MathUtils.clamp((currentScreen.x - previousScreen.x) * strength * 3, -0.12, 0.12);
-      mesh.material.cardUniforms.motionY.value = THREE.MathUtils.clamp((currentScreen.y - previousScreen.y) * strength * 3, -0.12, 0.12);
-      mesh.material.cardUniforms.motionAmount.value = Math.min(1, Math.hypot(currentScreen.x - previousScreen.x, currentScreen.y - previousScreen.y) * strength * 20);
-    } else {
-      mesh.material.cardUniforms.motionX.value = 0;
-      mesh.material.cardUniforms.motionY.value = 0;
-      mesh.material.cardUniforms.motionAmount.value = 0;
+      motionX = THREE.MathUtils.clamp((currentScreen.x - previousScreen.x) * strength * 3, -0.12, 0.12);
+      motionY = THREE.MathUtils.clamp((currentScreen.y - previousScreen.y) * strength * 3, -0.12, 0.12);
+      motionAmount = Math.min(1, Math.hypot(currentScreen.x - previousScreen.x, currentScreen.y - previousScreen.y) * strength * 20);
     }
+    const effects = card.blur > 0.01 || motionAmount > 0.0001;
+    if (mesh.material.cardEffectMode !== effects) {
+      const texture = controller.cache.get(card.cardId)?.texture;
+      if (texture) { mesh.material.dispose(); mesh.material = createCardMaterial(texture, effects); }
+    }
+    mesh.material.cardUniforms.opacity.value = card.opacity;
+    mesh.material.cardUniforms.blur.value = card.blur;
+    mesh.material.cardUniforms.selected.value = !options.clean && input.selectedCardId === card.cardId ? 1 : 0;
+    mesh.material.cardUniforms.hero.value = input.take.hero?.cardId === card.cardId ? 1 : 0;
+    mesh.material.cardUniforms.motionX.value = motionX;
+    mesh.material.cardUniforms.motionY.value = motionY;
+    mesh.material.cardUniforms.motionAmount.value = motionAmount;
     mesh.renderOrder = card.layerPriority;
   }
   controller.renderer.setRenderTarget(options.target ?? null);
@@ -289,16 +299,19 @@ export function syncSceneAssets(controller: SceneController, input: Pick<SceneRe
   let cancelled = false;
   let frame: number | null = null;
   onStatus({ state: dirty.length ? "rebuilding" : "ready", ready: hits, total, hits, misses: dirty.length, reason: dirty.length ? reason : "cache hit" });
-  const process = () => {
+  const process = async () => {
     if (cancelled) return;
-    for (let index = 0; index < 4 && completed < dirty.length; index += 1, completed += 1) {
-      const placement = dirty[completed];
+    const batch = dirty.slice(completed, completed + 4);
+    await Promise.all(batch.map(async (placement) => {
       const comment = commentsById.get(placement.cardId);
-      if (!comment) continue;
+      if (!comment) return;
       const key = createCardTextureKey(comment, input.cardStyle);
       const rasterStartedAt = performance.now();
-      const rendered = createCardTexture(comment, input.cardStyle);
+      const raster = await controller.rasterizer.rasterize(comment, input.cardStyle, 2);
       controller.telemetry.record("textureRaster", performance.now() - rasterStartedAt);
+      if (cancelled) { raster.dispose(); return; }
+      const rendered = createCardTextureFromSource(raster.source, raster.width, raster.height);
+      rendered.texture.addEventListener("dispose", raster.dispose);
       const planeWidth = Math.min(dimensions.width * 0.24, 1.2);
       const geometry = new THREE.PlaneGeometry(planeWidth, planeWidth / rendered.aspect);
       const existing = controller.meshes.get(placement.cardId);
@@ -306,12 +319,13 @@ export function syncSceneAssets(controller: SceneController, input: Pick<SceneRe
       else { const mesh = new THREE.Mesh(geometry, createCardMaterial(rendered.texture)); mesh.userData.cardId = placement.cardId; controller.cards.add(mesh); controller.meshes.set(placement.cardId, mesh); }
       controller.cache.get(placement.cardId)?.texture.dispose();
       controller.cache.set(placement.cardId, { key, texture: rendered.texture, aspect: rendered.aspect });
-    }
+    }));
+    completed += batch.length;
     onStatus({ state: completed < dirty.length ? "rebuilding" : "ready", ready: hits + completed, total, hits, misses: dirty.length, reason });
     onRender();
-    frame = completed < dirty.length ? requestAnimationFrame(process) : null;
+    frame = completed < dirty.length ? requestAnimationFrame(() => { void process(); }) : null;
   };
-  process();
+  void process();
   return { signatures: { style, comments: commentsSignature, cards }, cancel: () => { cancelled = true; if (frame !== null) cancelAnimationFrame(frame); } };
 }
 

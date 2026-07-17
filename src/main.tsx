@@ -1,11 +1,13 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
-import { App } from "./app/App";
 import { WebGpuGate } from "./app/WebGpuGate";
 import "./app/styles.css";
+import "./app/mobile.css";
+
+const App = lazy(() => import("./app/App").then((module) => ({ default: module.App })));
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <WebGpuGate><App /></WebGpuGate>
+    <WebGpuGate><Suspense fallback={<main className="loading-state">Loading authoring surface…</main>}><App /></Suspense></WebGpuGate>
   </React.StrictMode>,
 );

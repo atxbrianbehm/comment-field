@@ -1,4 +1,5 @@
 export * from "./cardCache";
+export * from "./cardRasterService";
 export * from "./cardMaterial.js";
 export * from "./cardTexture";
 export * from "./frameSizing";

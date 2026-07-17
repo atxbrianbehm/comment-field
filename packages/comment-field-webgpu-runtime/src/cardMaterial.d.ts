@@ -14,7 +14,8 @@ export interface CardMaterial extends THREE.Material {
     motionAmount: MutableUniformNode;
   };
   cardTextures: MutableTextureNode[];
+  cardEffectMode: boolean;
 }
 
-export function createCardMaterial(texture: THREE.Texture): CardMaterial;
+export function createCardMaterial(texture: THREE.Texture, effects?: boolean): CardMaterial;
 export function setCardMaterialTexture(material: CardMaterial, texture: THREE.Texture): void;

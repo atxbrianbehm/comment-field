@@ -5,7 +5,6 @@ import {
   resolveGestureTriggers, serializeProject, settleCameraOnHero, type Composition, type GestureSample,
   type HeroPerformance, type Project, type Take,
 } from "@comment-field/engine";
-import { exportPngSequence } from "../export/pngSequence";
 import type { CommentSceneHandle, InteractionMode, TransformPatch } from "../renderer/CommentScene";
 
 type Workspace = "field" | "design" | "animate";
@@ -304,6 +303,7 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
       pausePlayback();
       setExportProgress({ frame: 0, total: Math.round(duration * composition.frameRate) });
       sceneRef.current.beginExport(width, height);
+      const { exportPngSequence } = await import("../export/pngSequence");
       const blob = await exportPngSequence(sceneRef.current.renderFrame, {
         width,
         height,

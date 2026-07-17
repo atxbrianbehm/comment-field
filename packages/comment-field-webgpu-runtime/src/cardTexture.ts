@@ -8,7 +8,10 @@ function hexWithOpacity(hex: string, opacity: number) {
   return `rgba(${(number >> 16) & 255}, ${(number >> 8) & 255}, ${number & 255}, ${opacity})`;
 }
 
-function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+type CardCanvas = HTMLCanvasElement | OffscreenCanvas;
+type CardContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+
+function roundedRect(context: CardContext, x: number, y: number, width: number, height: number, radius: number) {
   const r = Math.min(radius, width / 2, height / 2);
   context.beginPath();
   context.moveTo(x + r, y);
@@ -19,7 +22,7 @@ function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, wi
   context.closePath();
 }
 
-function wrapLines(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
+function wrapLines(context: CardContext, text: string, maxWidth: number) {
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let line = "";
@@ -35,7 +38,7 @@ function wrapLines(context: CanvasRenderingContext2D, text: string, maxWidth: nu
 }
 
 export interface CardTextureResult {
-  texture: THREE.CanvasTexture;
+  texture: THREE.Texture;
   aspect: number;
 }
 
@@ -45,11 +48,14 @@ export function avatarInitialForComment(comment: CommentRecord) {
 }
 
 export function renderCardCanvas(comment: CommentRecord, style: CardStyle, pixelRatio = 2): HTMLCanvasElement {
+  return renderCardSurface(comment, style, document.createElement("canvas"), pixelRatio) as HTMLCanvasElement;
+}
+
+export function renderCardSurface(comment: CommentRecord, style: CardStyle, canvas: CardCanvas, pixelRatio = 2): CardCanvas {
   const shadowMargin = 24;
   const width = style.width;
   const contentWidth = width - style.padding * 2;
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d")!;
+  const context = canvas.getContext("2d") as CardContext;
   context.font = `${style.bodySize}px Inter, ui-sans-serif, system-ui, sans-serif`;
   const lines = wrapLines(context, comment.message, contentWidth);
   const headerVisible = style.showAvatar || style.showDisplayName || style.showHandle || style.showTimestamp;
@@ -121,11 +127,15 @@ export function renderCardCanvas(comment: CommentRecord, style: CardStyle, pixel
 
 export function createCardTexture(comment: CommentRecord, style: CardStyle): CardTextureResult {
   const canvas = renderCardCanvas(comment, style);
-  const texture = new THREE.CanvasTexture(canvas);
+  return createCardTextureFromSource(canvas, canvas.width, canvas.height);
+}
+
+export function createCardTextureFromSource(source: CanvasImageSource, width: number, height: number): CardTextureResult {
+  const texture = new THREE.Texture(source);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = true;
   texture.needsUpdate = true;
-  return { texture, aspect: canvas.width / canvas.height };
+  return { texture, aspect: width / height };
 }

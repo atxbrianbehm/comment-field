@@ -4,6 +4,7 @@ import {
   MousePointer2, Move3d, Palette, Pause, Play, Plus, RefreshCw, Save, Shield, Sparkles, Star,
   Trash2, Unlock, WandSparkles,
 } from "lucide-react";
+import { Suspense, lazy } from "react";
 import {
   clearHeroPerformance,
   createDefaultProject,
@@ -28,17 +29,20 @@ import {
   type Project,
   type Take,
 } from "@comment-field/engine";
-import { exportPngSequence } from "../export/pngSequence";
 import { loadAutosave, saveAutosave } from "../infrastructure/projectStore";
 import { CommentScene, type CacheStatus, type CommentSceneHandle, type InteractionMode, type TransformPatch } from "../renderer/CommentScene";
-import { CameraWorkspace, DesignWorkspace, EntranceWorkspace, HeroWorkspace } from "./AuthoringWorkspaces";
 import { formatTimecode, KeyframeTimeline } from "./KeyframeTimeline";
 import { Field, IconButton, PanelSection, SelectField, Slider } from "./Controls";
 import { CurveEditor } from "./MotionEditors";
-import { HelpOverlay } from "./HelpOverlay";
 import { usePreviewPlayback } from "./usePreviewPlayback";
 import { FieldWorkspace } from "./FieldWorkspace";
 import { useAuthoringActions } from "./useAuthoringActions";
+
+const CameraWorkspace = lazy(() => import("./CameraWorkspace").then((module) => ({ default: module.CameraWorkspace })));
+const DesignWorkspace = lazy(() => import("./DesignWorkspace").then((module) => ({ default: module.DesignWorkspace })));
+const EntranceWorkspace = lazy(() => import("./EntranceWorkspace").then((module) => ({ default: module.EntranceWorkspace })));
+const HeroWorkspace = lazy(() => import("./HeroWorkspace").then((module) => ({ default: module.HeroWorkspace })));
+const HelpOverlay = lazy(() => import("./HelpOverlay").then((module) => ({ default: module.HelpOverlay })));
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const makeId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
@@ -208,6 +212,7 @@ export function App() {
         addProtectedRegion={addProtectedRegion} removeHero={removeHero} setHero={setHero} updateBuild={updateBuild}
         randomizeBuild={randomizeBuild} alignCameraToHero={alignCameraToHero} bakeReflow={bakeReflow}
       />}
+      <Suspense fallback={<main className="loading-state">Loading workspace…</main>}>
       {workspace === "design" && <DesignWorkspace comment={representativeComment} style={project.cardStyle} onStyleChange={(key, value) => mutateProject((draft) => { Object.assign(draft.cardStyle, { [key]: value }); })} onBack={() => setWorkspace("field")} />}
       {workspace === "animate" && (
         <div className="animate-shell">
@@ -253,6 +258,7 @@ export function App() {
               : <HeroWorkspace composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} style={project.cardStyle} renderSettings={project.renderSettings} time={time} selectedCardId={take.hero?.cardId ?? selectedCardId} sceneRef={sceneRef} onTimeChange={scrubTo} onHeroChange={(hero) => mutateTake((draft) => { draft.hero = hero; })} onRemoveHero={removeHero} onBakeReflow={bakeReflow} onBack={() => setWorkspace("field")} onCacheStatus={setCacheStatus} autoKey={autoKey} />}
         </div>
       )}
+      </Suspense>
 
       <footer className="transport">
         <button className="play-button" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"}><span className={playing ? "icon-state visible" : "icon-state"}><Pause size={18} /></span><span className={!playing ? "icon-state visible play-icon" : "icon-state play-icon"}><Play size={18} /></span></button>
@@ -267,7 +273,7 @@ export function App() {
           <IconButton label="Delete take" onClick={deleteTake}><Trash2 size={16} /></IconButton>
         </div>
       </footer>
-      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+      {helpOpen && <Suspense fallback={null}><HelpOverlay onClose={() => setHelpOpen(false)} /></Suspense>}
     </main>
   );
 }

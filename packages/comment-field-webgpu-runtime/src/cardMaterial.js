@@ -1,10 +1,12 @@
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import * as TSL from "three/tsl";
 import composeCardSource from "./shaders/card-composite.wgsl?raw";
+import composeBasicCardSource from "./shaders/card-basic.wgsl?raw";
 
 const composeCard = TSL.wgslFn(composeCardSource);
+const composeBasicCard = TSL.wgslFn(composeBasicCardSource);
 
-export function createCardMaterial(texture) {
+export function createCardMaterial(texture, effects = false) {
   const opacity = TSL.uniform(1);
   const blur = TSL.uniform(0);
   const selected = TSL.uniform(0);
@@ -14,16 +16,14 @@ export function createCardMaterial(texture) {
   const motionAmount = TSL.uniform(0);
   const cardUv = TSL.uv();
   const spread = blur.mul(0.0016);
-  const samples = [
-    TSL.texture(texture, cardUv),
-    TSL.texture(texture, cardUv.add(TSL.vec2(spread, 0))),
-    TSL.texture(texture, cardUv.sub(TSL.vec2(spread, 0))),
-    TSL.texture(texture, cardUv.add(TSL.vec2(0, spread))),
-    TSL.texture(texture, cardUv.sub(TSL.vec2(0, spread))),
-    TSL.texture(texture, cardUv.add(TSL.vec2(motionX, motionY))),
-    TSL.texture(texture, cardUv.sub(TSL.vec2(motionX, motionY))),
-  ];
-  const composed = composeCard({
+  const center = TSL.texture(texture, cardUv);
+  const samples = effects ? [
+    center,
+    TSL.texture(texture, cardUv.add(TSL.vec2(spread, 0))), TSL.texture(texture, cardUv.sub(TSL.vec2(spread, 0))),
+    TSL.texture(texture, cardUv.add(TSL.vec2(0, spread))), TSL.texture(texture, cardUv.sub(TSL.vec2(0, spread))),
+    TSL.texture(texture, cardUv.add(TSL.vec2(motionX, motionY))), TSL.texture(texture, cardUv.sub(TSL.vec2(motionX, motionY))),
+  ] : [center];
+  const composed = effects ? composeCard({
     center: samples[0],
     positive_x: samples[1],
     negative_x: samples[2],
@@ -37,13 +37,14 @@ export function createCardMaterial(texture) {
     selected_amount: selected,
     hero_amount: hero,
     opacity_amount: opacity,
-  });
+  }) : composeBasicCard({ center, card_uv: cardUv, selected_amount: selected, hero_amount: hero, opacity_amount: opacity });
   const material = new MeshBasicNodeMaterial({ transparent: true, depthTest: true, depthWrite: false });
   material.colorNode = composed.rgb;
   material.opacityNode = composed.a;
   material.alphaTest = 0.01;
   material.cardUniforms = { opacity, blur, selected, hero, motionX, motionY, motionAmount };
   material.cardTextures = samples;
+  material.cardEffectMode = effects;
   return material;
 }
 
