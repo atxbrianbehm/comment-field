@@ -20,12 +20,21 @@ export function generateScatter(
   const maxX = 0.5 + fieldBounds.width / 2 - edge;
   const minY = 0.5 - fieldBounds.height / 2 + edge;
   const maxY = 0.5 + fieldBounds.height / 2 - edge;
+  const oversized = fieldBounds.width > 1 || fieldBounds.height > 1;
+  const mainFrameQuota = oversized
+    ? Math.min(visibleCount, Math.min(12, Math.max(6, Math.ceil(Math.sqrt(visibleCount)) * 2)))
+    : visibleCount;
 
   for (let index = 0; index < visibleCount; index += 1) {
-    let best = { x: minX + random() * (maxX - minX), y: minY + random() * (maxY - minY) };
+    const keepInMainFrame = index < mainFrameQuota;
+    const zoneMinX = keepInMainFrame ? Math.max(minX, edge) : minX;
+    const zoneMaxX = keepInMainFrame ? Math.min(maxX, 1 - edge) : maxX;
+    const zoneMinY = keepInMainFrame ? Math.max(minY, edge) : minY;
+    const zoneMaxY = keepInMainFrame ? Math.min(maxY, 1 - edge) : maxY;
+    let best = { x: zoneMinX + random() * (zoneMaxX - zoneMinX), y: zoneMinY + random() * (zoneMaxY - zoneMinY) };
     let bestScore = -Infinity;
     for (let attempt = 0; attempt < 80; attempt += 1) {
-      const candidate = { x: minX + random() * (maxX - minX), y: minY + random() * (maxY - minY) };
+      const candidate = { x: zoneMinX + random() * (zoneMaxX - zoneMinX), y: zoneMinY + random() * (zoneMaxY - zoneMinY) };
       const centerDistance = Math.hypot(candidate.x - 0.5, candidate.y - 0.5);
       if (centerDistance < settings.centerExclusion) continue;
       if (protectedRegions.some((region) => pointInRegion(candidate.x, candidate.y, region, settings.minSpacing * 0.35))) continue;
