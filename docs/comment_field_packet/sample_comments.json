@@ -1,0 +1,68 @@
+[
+  {
+    "id": "comment-001",
+    "username": "PizzaFan88",
+    "handle": "@PizzaFan88",
+    "message": "We need chunky sausage back",
+    "timestamp": "2m",
+    "replies": 1,
+    "reposts": 2,
+    "likes": 7,
+    "heroEligible": true
+  },
+  {
+    "id": "comment-002",
+    "username": "SauceBoss",
+    "handle": "@SauceBoss",
+    "message": "This was the best topping",
+    "timestamp": "1m",
+    "replies": 2,
+    "reposts": 3,
+    "likes": 12,
+    "heroEligible": true
+  },
+  {
+    "id": "comment-003",
+    "username": "CrustCritic",
+    "handle": "@CrustCritic",
+    "message": "Ordering somewhere else",
+    "timestamp": "2m",
+    "replies": 1,
+    "reposts": 1,
+    "likes": 5,
+    "heroEligible": true
+  },
+  {
+    "id": "comment-004",
+    "username": "SliceSeeker",
+    "handle": "@SliceSeeker",
+    "message": "Please tell me this is temporary",
+    "timestamp": "1m",
+    "replies": 1,
+    "reposts": 2,
+    "likes": 6,
+    "heroEligible": true
+  },
+  {
+    "id": "comment-005",
+    "username": "PizzaLover",
+    "handle": "@PizzaLover",
+    "message": "BRING IT BACK",
+    "timestamp": "30s",
+    "replies": 3,
+    "reposts": 4,
+    "likes": 15,
+    "heroEligible": true
+  },
+  {
+    "id": "comment-006",
+    "username": "Papa Murphy's",
+    "handle": "@PapaMurphys",
+    "message": "Chunky's Back. You're Welcome.",
+    "timestamp": "now",
+    "replies": 243,
+    "reposts": 512,
+    "likes": 1800,
+    "heroEligible": true
+  }
+]
