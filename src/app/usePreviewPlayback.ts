@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import type { CardStyle, CommentRecord, Composition, EntranceMotionTemplate, PreviewCacheStatus, Take } from "@comment-field/engine";
+import type { CardStyle, CommentRecord, Composition, EntranceMotionTemplate, PreviewCacheStatus, RenderSettings, Take } from "@comment-field/engine";
 import {
   choosePreviewDimensions,
   createPreviewCacheKey,
   DEFAULT_PREVIEW_CACHE_SETTINGS,
   previewDecodeWindow,
   previewFrameIndex,
+  performanceProfileKey,
+  selectPerformanceProfile,
   wallClockPlaybackTime,
 } from "@comment-field/webgpu-runtime";
 import type { CacheStatus, CommentSceneHandle } from "../renderer/CommentScene";
@@ -26,6 +28,7 @@ interface PreviewPlaybackInput {
   entranceMotion: EntranceMotionTemplate;
   comments: CommentRecord[];
   cardStyle: CardStyle;
+  renderSettings: RenderSettings;
   workspace: "field" | "design" | "animate";
   cacheStatus: CacheStatus;
   sceneRef: RefObject<CommentSceneHandle | null>;
@@ -38,7 +41,7 @@ const initialStatus = (): PreviewCacheStatus => ({
 });
 
 export function usePreviewPlayback(input: PreviewPlaybackInput) {
-  const { composition, take, entranceMotion, comments, cardStyle, workspace, cacheStatus, sceneRef, mutateTake } = input;
+  const { composition, take, entranceMotion, comments, cardStyle, renderSettings, workspace, cacheStatus, sceneRef, mutateTake } = input;
   const duration = take.duration ?? 8;
   const [time, setTime] = useState(duration);
   const [playing, setPlaying] = useState(false);
@@ -50,10 +53,17 @@ export function usePreviewPlayback(input: PreviewPlaybackInput) {
   const previewCacheRef = useRef<PreviewCacheData | null>(null);
   const decodedFramesRef = useRef(new Map<number, ImageBitmap>());
   const decodingFramesRef = useRef(new Set<number>());
-  const previewKey = useMemo(
-    () => createPreviewCacheKey(composition, take, take.entranceOverride ?? entranceMotion, comments, cardStyle),
-    [composition, take, entranceMotion, comments, cardStyle],
-  );
+  const performanceProfile = useMemo(() => selectPerformanceProfile({
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio,
+    deviceMemoryGb: (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+  }), []);
+  const previewFrameRate = Math.min(performanceProfile.previewFrameRate, composition.frameRate);
+  const previewKey = useMemo(() => [
+    createPreviewCacheKey(composition, take, take.entranceOverride ?? entranceMotion, comments, cardStyle, renderSettings),
+    performanceProfileKey(performanceProfile),
+  ].join("-"), [composition, take, entranceMotion, comments, cardStyle, renderSettings, performanceProfile]);
 
   function releaseDecodedFrames() {
     decodedFramesRef.current.forEach((bitmap) => bitmap.close());
@@ -67,8 +77,8 @@ export function usePreviewPlayback(input: PreviewPlaybackInput) {
     previewCacheRef.current = null;
     sceneRef.current?.hidePreview();
     setPreviewStatus({
-      state, readyFrames: 0, totalFrames: Math.max(1, Math.round(duration * composition.frameRate)),
-      width: 0, height: 0, frameRate: composition.frameRate, memoryBytes: 0, key: previewKey,
+      state, readyFrames: 0, totalFrames: Math.max(1, Math.round(duration * previewFrameRate)),
+      width: 0, height: 0, frameRate: previewFrameRate, memoryBytes: 0, key: previewKey,
       reason, playbackMode: "live",
     });
   }
@@ -105,15 +115,15 @@ export function usePreviewPlayback(input: PreviewPlaybackInput) {
     const scene = sceneRef.current;
     if (!scene || workspace !== "field" || playingRef.current || cacheStatus.state !== "ready") return;
     const token = ++previewJobRef.current;
-    const settings = DEFAULT_PREVIEW_CACHE_SETTINGS;
+    const settings = { ...DEFAULT_PREVIEW_CACHE_SETTINGS, proxyLongEdges: performanceProfile.previewLongEdges, memoryBudgetBytes: performanceProfile.previewMemoryBudgetBytes };
     const { width, height } = choosePreviewDimensions(composition, duration, settings);
-    const totalFrames = Math.max(1, Math.round(duration * composition.frameRate));
+    const totalFrames = Math.max(1, Math.round(duration * previewFrameRate));
     const frames: Blob[] = [];
     let memoryBytes = 0;
     releaseDecodedFrames();
     previewCacheRef.current = null;
     setPreviewStatus({
-      state: "caching", readyFrames: 0, totalFrames, width, height, frameRate: composition.frameRate,
+      state: "caching", readyFrames: 0, totalFrames, width, height, frameRate: previewFrameRate,
       memoryBytes: 0, key: previewKey, reason: "rendering exact preview frames", playbackMode: "live",
     });
     try {
@@ -122,7 +132,7 @@ export function usePreviewPlayback(input: PreviewPlaybackInput) {
           if (token === previewJobRef.current) setPreviewStatus((current) => ({ ...current, state: "stale", reason: "preview caching paused for playback" }));
           return;
         }
-        const blob = await scene.renderPreviewFrame(frame / composition.frameRate, width, height, settings.webpQuality);
+        const blob = await scene.renderPreviewFrame(frame / previewFrameRate, width, height, settings.webpQuality);
         if (token !== previewJobRef.current) return;
         frames.push(blob);
         memoryBytes += blob.size;
@@ -132,18 +142,18 @@ export function usePreviewPlayback(input: PreviewPlaybackInput) {
         }
       }
       if (token !== previewJobRef.current) return;
-      previewCacheRef.current = { key: previewKey, frames, width, height, frameRate: composition.frameRate, duration, memoryBytes };
+      previewCacheRef.current = { key: previewKey, frames, width, height, frameRate: previewFrameRate, duration, memoryBytes };
       setPreviewStatus({
-        state: "ready", readyFrames: totalFrames, totalFrames, width, height, frameRate: composition.frameRate,
+        state: "ready", readyFrames: totalFrames, totalFrames, width, height, frameRate: previewFrameRate,
         memoryBytes, key: previewKey, reason: "active take cached in memory", playbackMode: "live",
       });
-      await decodePreviewWindow(previewFrameIndex(playheadRef.current, duration, composition.frameRate));
+      await decodePreviewWindow(previewFrameIndex(playheadRef.current, duration, previewFrameRate));
     } catch (error) {
       if (token !== previewJobRef.current) return;
       releaseDecodedFrames();
       previewCacheRef.current = null;
       setPreviewStatus({
-        state: "error", readyFrames: frames.length, totalFrames, width, height, frameRate: composition.frameRate,
+        state: "error", readyFrames: frames.length, totalFrames, width, height, frameRate: previewFrameRate,
         memoryBytes, key: previewKey, reason: error instanceof Error ? error.message : "preview cache failed", playbackMode: "live",
       });
     }
@@ -166,12 +176,12 @@ export function usePreviewPlayback(input: PreviewPlaybackInput) {
   useEffect(() => {
     if (!playing) return;
     const cache = previewCacheRef.current;
-    const cachedPlayback = Boolean(cache && cache.key === previewKey && cache.frames.length === Math.round(duration * composition.frameRate));
+    const cachedPlayback = Boolean(cache && cache.key === previewKey && cache.frames.length === Math.round(duration * previewFrameRate));
     playbackStartRef.current = performance.now() - playheadRef.current * 1000;
     let frame = 0;
     let lastRenderedAt = 0;
     let lastUiUpdate = 0;
-    const frameInterval = 1000 / composition.frameRate;
+    const frameInterval = 1000 / (cachedPlayback && cache ? cache.frameRate : composition.frameRate);
     setPreviewStatus((current) => ({ ...current, playbackMode: cachedPlayback ? "cached" : "live" }));
     const tick = (now: number) => {
       const elapsed = wallClockPlaybackTime(0, playbackStartRef.current, now, duration);
@@ -204,7 +214,7 @@ export function usePreviewPlayback(input: PreviewPlaybackInput) {
       sceneRef.current?.renderLiveFrame(playheadRef.current);
       setPreviewStatus((current) => ({ ...current, playbackMode: "live" }));
     };
-  }, [playing, duration, composition.frameRate, previewKey]);
+  }, [playing, duration, composition.frameRate, previewFrameRate, previewKey]);
 
   function pausePlayback() {
     setPlaying(false);
@@ -256,7 +266,7 @@ export function usePreviewPlayback(input: PreviewPlaybackInput) {
     time, playing, previewStatus, setPreviewStatus, clearPreviewCache, pausePlayback, togglePlayback,
     beginManipulation, scrubTo, changeTakeDuration, setPlayhead,
     previewProgress: previewStatus.totalFrames > 0 ? previewStatus.readyFrames / previewStatus.totalFrames : 0,
-    previewMemory: `${(previewStatus.memoryBytes / (1024 * 1024)).toFixed(1)} MB`,
+    previewMemory: `${(previewStatus.memoryBytes / (1024 * 1024)).toFixed(1)} MB`, performanceProfile,
     cachedPlaybackActive: playing && previewStatus.playbackMode === "cached",
   };
 }

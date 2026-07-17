@@ -1,4 +1,4 @@
-export const PROJECT_VERSION = 7;
+export const PROJECT_VERSION = 8;
 
 export interface CommentRecord {
   id: string;
@@ -168,6 +168,16 @@ export interface EntranceMotionTemplate extends SpringMotionSettings, AmbientDri
   opacityEasing: CubicBezierCurve;
 }
 
+export interface MotionBlurSettings {
+  enabled: boolean;
+  shutterAngle: number;
+  strength: number;
+}
+
+export interface RenderSettings {
+  motionBlur: MotionBlurSettings;
+}
+
 export interface PreviewCacheSettings {
   idleDelayMs: number;
   memoryBudgetBytes: number;
@@ -283,6 +293,7 @@ export interface Project {
   comments: CommentRecord[];
   cardStyle: CardStyle;
   entranceMotion: EntranceMotionTemplate;
+  renderSettings: RenderSettings;
   assets: AssetReference[];
   compositions: Composition[];
   takes: Take[];

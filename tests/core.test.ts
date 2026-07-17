@@ -31,7 +31,7 @@ import {
   type TimedKeyframe,
 } from "@comment-field/engine";
 import { exportPngSequence } from "../src/export/pngSequence";
-import { avatarInitialForComment, createCardTextureKey, createSceneAssetKey, fitFrameWithinBounds } from "@comment-field/webgpu-runtime";
+import { avatarInitialForComment, createCardTextureKey, createSceneAssetKey, fitFrameWithinBounds, performanceProfileKey, selectPerformanceProfile } from "@comment-field/webgpu-runtime";
 import { editorPointToMotion, frameEntrancePath, motionPointToEditor } from "../src/app/motionViewport";
 import {
   choosePreviewDimensions,
@@ -43,6 +43,22 @@ import {
 
 describe("deterministic project core", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("creates new compositions at the primary 24 fps target", () => {
+    const project = createDefaultProject();
+    expect(project.compositions.every((composition) => composition.frameRate === 24)).toBe(true);
+    expect(project.renderSettings.motionBlur).toEqual({ enabled: false, shutterAngle: 180, strength: 1 });
+  });
+
+  it("selects bounded desktop, tablet, and phone performance profiles", () => {
+    const phone = selectPerformanceProfile({ viewportWidth: 390, viewportHeight: 844, devicePixelRatio: 3, deviceMemoryGb: 4 });
+    const tablet = selectPerformanceProfile({ viewportWidth: 820, viewportHeight: 1180, devicePixelRatio: 2, deviceMemoryGb: 8 });
+    const desktop = selectPerformanceProfile({ viewportWidth: 1920, viewportHeight: 1080, devicePixelRatio: 2, deviceMemoryGb: 16 });
+    expect(phone).toMatchObject({ class: "phone", previewFrameRate: 24, canvasPixelRatio: 1 });
+    expect(tablet).toMatchObject({ class: "tablet", previewFrameRate: 24 });
+    expect(desktop).toMatchObject({ class: "desktop", previewFrameRate: 24 });
+    expect(performanceProfileKey(phone)).not.toBe(performanceProfileKey(desktop));
+  });
   it("snaps, replaces, and moves typed keyframes at frame precision", () => {
     const fps = 30;
     const easing = { x1: 0, y1: 0, x2: 1, y2: 1 };
@@ -442,6 +458,9 @@ describe("deterministic project core", () => {
     expect(createPreviewCacheKey({ ...composition, backgroundColor: "#000000" }, take, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(key);
     expect(createPreviewCacheKey(composition, take, { ...project.entranceMotion, driftAmount: 0.02 }, project.comments, project.cardStyle)).not.toBe(key);
     expect(createPreviewCacheKey(composition, { ...take, duration: take.duration + 1 }, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(key);
+    expect(createPreviewCacheKey(composition, take, project.entranceMotion, project.comments, project.cardStyle, { motionBlur: { ...project.renderSettings.motionBlur, enabled: true } })).not.toBe(
+      createPreviewCacheKey(composition, take, project.entranceMotion, project.comments, project.cardStyle, project.renderSettings),
+    );
     expect(createPreviewCacheKey(composition, { ...take, cameraKeyframes: [{ id: "camera", time: 1, pose: { ...composition.camera, x: 1 }, easing: { x1: 0, y1: 0, x2: 1, y2: 1 }, holdDuration: 0, cut: false }] }, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(key);
     const dimensions = choosePreviewDimensions(composition, take.duration);
     expect(Math.max(dimensions.width, dimensions.height)).toBeLessThanOrEqual(960);

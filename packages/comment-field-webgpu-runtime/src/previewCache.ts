@@ -3,6 +3,7 @@ import type {
   CommentRecord,
   Composition,
   EntranceMotionTemplate,
+  RenderSettings,
   PreviewCacheSettings,
   Take,
 } from "@comment-field/engine";
@@ -31,6 +32,7 @@ export function createPreviewCacheKey(
   entranceMotion: EntranceMotionTemplate,
   comments: CommentRecord[],
   cardStyle: CardStyle,
+  renderSettings?: RenderSettings,
 ) {
   const source = JSON.stringify({
     composition: {
@@ -59,6 +61,7 @@ export function createPreviewCacheKey(
     entranceMotion,
     comments,
     cardStyle,
+    renderSettings,
   });
   return `preview-${hashString(source)}-${source.length}`;
 }

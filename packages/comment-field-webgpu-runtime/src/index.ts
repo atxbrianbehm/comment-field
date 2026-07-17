@@ -3,6 +3,8 @@ export * from "./cardMaterial.js";
 export * from "./cardTexture";
 export * from "./frameSizing";
 export * from "./previewCache";
+export * from "./performanceProfile";
+export * from "./performanceTelemetry";
 export * from "./sceneAssetKey";
 export * from "./sceneRuntime";
 export * from "./webgpuRenderer.js";

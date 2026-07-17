@@ -78,6 +78,7 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
     transformCard, completeGesture, scatter, fitFieldToComments, addProtectedRegion, removeHero, setHero, updateBuild,
     randomizeBuild, alignCameraToHero, bakeReflow,
   } = props;
+  const telemetry = sceneRef.current?.getPerformanceTelemetry();
   return (
     <>
       <aside className="left-panel panel-scroll">
@@ -119,6 +120,7 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             <div>
               <span>{cacheStatus.hits} texture hits · {cacheStatus.misses} misses</span>
               <span>{previewStatus.frameRate || composition.frameRate} fps · {previewMemory}</span>
+              {telemetry && <span>Render {telemetry.sceneRender.averageMs.toFixed(1)} ms · Readback {telemetry.gpuReadback.averageMs.toFixed(1)} ms · Encode {telemetry.frameEncode.averageMs.toFixed(1)} ms</span>}
               <code>{previewStatus.key.slice(0, 24) || "no preview key"}</code>
               <strong>{previewStatus.reason}</strong>
               <div className="cache-actions">
@@ -135,7 +137,7 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
         </div>
         <div className="stage-wrap">
           <div className="stage-grid" />
-          <CommentScene ref={sceneRef} composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} cardStyle={project.cardStyle} time={time} selectedCardId={selectedCardId} mode={mode} viewMode={playing ? "camera" : fieldView} showTransformHandles onSelect={setSelectedCardId} onTransformCard={transformCard} onGestureComplete={completeGesture} onCacheStatus={setCacheStatus} onManipulationStart={beginManipulation} />
+          <CommentScene ref={sceneRef} composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} cardStyle={project.cardStyle} renderSettings={project.renderSettings} time={time} selectedCardId={selectedCardId} mode={mode} viewMode={playing ? "camera" : fieldView} showTransformHandles onSelect={setSelectedCardId} onTransformCard={transformCard} onGestureComplete={completeGesture} onCacheStatus={setCacheStatus} onManipulationStart={beginManipulation} />
           {mode === "record" && <div className="record-hint"><CircleDot size={13} />Drag a path across the field</div>}
         </div>
       </section>
@@ -194,6 +196,16 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             <button onClick={() => mutateProject((draft) => { draft.entranceMotion.opacityEasing = { x1: 0.42, y1: 0, x2: 1, y2: 1 }; })}>Ease in</button>
             <button onClick={() => mutateProject((draft) => { draft.entranceMotion.opacityEasing = { x1: 0.16, y1: 1, x2: 0.3, y2: 1 }; })}>Ease out</button>
           </div>
+        </PanelSection>}
+        {rightTab === "build" && <PanelSection title="Motion blur" meta={project.renderSettings.motionBlur.enabled ? "On" : "Off"}>
+          <p className="panel-explainer">Apply deterministic directional blur from card, hero, and camera movement. Production export and cached playback use the same shutter.</p>
+          <button className={`secondary-button wide ${project.renderSettings.motionBlur.enabled ? "is-active" : ""}`} aria-pressed={project.renderSettings.motionBlur.enabled} onClick={() => mutateProject((draft) => { draft.renderSettings.motionBlur.enabled = !draft.renderSettings.motionBlur.enabled; })}>
+            {project.renderSettings.motionBlur.enabled ? "Disable motion blur" : "Enable motion blur"}
+          </button>
+          {project.renderSettings.motionBlur.enabled && <>
+            <Slider label="Shutter angle" min={45} max={360} step={15} value={project.renderSettings.motionBlur.shutterAngle} display={`${project.renderSettings.motionBlur.shutterAngle.toFixed(0)}°`} onChange={(event) => mutateProject((draft) => { draft.renderSettings.motionBlur.shutterAngle = Number(event.target.value); })} />
+            <Slider label="Strength" min={0.25} max={2} step={0.05} value={project.renderSettings.motionBlur.strength} display={`${project.renderSettings.motionBlur.strength.toFixed(2)}×`} onChange={(event) => mutateProject((draft) => { draft.renderSettings.motionBlur.strength = Number(event.target.value); })} />
+          </>}
         </PanelSection>}
         {rightTab === "hero" && <PanelSection title="Hero transition" meta={take.hero ? project.comments.find((item) => item.id === take.hero?.cardId)?.handle : "Not set"}>
           {!take.hero ? <div className="empty-hero"><Heart size={24} /><p>Select an eligible post, then choose <strong>Make hero</strong>.</p></div> : <>

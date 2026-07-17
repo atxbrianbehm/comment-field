@@ -24,6 +24,7 @@ import {
   type HeroKeyframe,
   type HeroPerformance,
   type Point2D,
+  type RenderSettings,
   type Take,
 } from "@comment-field/engine";
 import { CommentScene, type CacheStatus, type CommentSceneHandle, type TransformPatch } from "../renderer/CommentScene";
@@ -38,6 +39,7 @@ export function HeroWorkspace({
   entranceMotion,
   comments,
   style,
+  renderSettings,
   time,
   selectedCardId,
   sceneRef,
@@ -54,6 +56,7 @@ export function HeroWorkspace({
   entranceMotion: EntranceMotionTemplate;
   comments: CommentRecord[];
   style: CardStyle;
+  renderSettings: RenderSettings;
   time: number;
   selectedCardId: string | null;
   sceneRef: React.RefObject<CommentSceneHandle | null>;
@@ -151,6 +154,7 @@ export function HeroWorkspace({
               entranceMotion={entranceMotion}
               comments={comments}
               cardStyle={style}
+              renderSettings={renderSettings}
               time={time}
               selectedCardId={selectedCardId}
               mode="select"

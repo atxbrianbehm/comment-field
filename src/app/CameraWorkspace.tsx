@@ -24,6 +24,7 @@ import {
   type HeroKeyframe,
   type HeroPerformance,
   type Point2D,
+  type RenderSettings,
   type Take,
 } from "@comment-field/engine";
 import { CommentScene, type CacheStatus, type CommentSceneHandle, type TransformPatch } from "../renderer/CommentScene";
@@ -38,6 +39,7 @@ export function CameraWorkspace({
   entranceMotion,
   comments,
   style,
+  renderSettings,
   time,
   sceneRef,
   onTimeChange,
@@ -52,6 +54,7 @@ export function CameraWorkspace({
   entranceMotion: EntranceMotionTemplate;
   comments: CommentRecord[];
   style: CardStyle;
+  renderSettings: RenderSettings;
   time: number;
   sceneRef: React.RefObject<CommentSceneHandle | null>;
   onTimeChange: (time: number) => void;
@@ -191,6 +194,7 @@ export function CameraWorkspace({
             entranceMotion={entranceMotion}
             comments={comments}
             cardStyle={style}
+            renderSettings={renderSettings}
             time={time}
             selectedCardId={null}
             mode="select"

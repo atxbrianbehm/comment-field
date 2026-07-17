@@ -4,8 +4,11 @@ fn compose_card(
   negative_x: vec4<f32>,
   positive_y: vec4<f32>,
   negative_y: vec4<f32>,
+  motion_positive: vec4<f32>,
+  motion_negative: vec4<f32>,
   card_uv: vec2<f32>,
   blur_amount: f32,
+  motion_amount: f32,
   selected_amount: f32,
   hero_amount: f32,
   opacity_amount: f32
@@ -17,6 +20,10 @@ fn compose_card(
       + negative_x * 0.15
       + positive_y * 0.15
       + negative_y * 0.15;
+  }
+  if (motion_amount > 0.0001) {
+    let motion_color = center * 0.5 + motion_positive * 0.25 + motion_negative * 0.25;
+    color = mix(color, motion_color, min(1.0, motion_amount));
   }
 
   let edge = select(0.0, 1.0, card_uv.x <= 0.016)

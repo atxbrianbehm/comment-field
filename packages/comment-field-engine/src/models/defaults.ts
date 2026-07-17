@@ -2,7 +2,7 @@ import { resolveBuildTriggers } from "../animation/build";
 import { DEFAULT_COMMENTS } from "../fixtures/defaultComments";
 import { generateScatter } from "../layout/scatter";
 import { cloneValue } from "../utils/clone";
-import type { BuildPerformance, CardStyle, Composition, EntranceMotionTemplate, Project, ScatterSettings, Take } from "./types";
+import type { BuildPerformance, CardStyle, Composition, EntranceMotionTemplate, Project, RenderSettings, ScatterSettings, Take } from "./types";
 import { PROJECT_VERSION } from "./types";
 
 export const DEFAULT_CARD_STYLE: CardStyle = {
@@ -46,6 +46,14 @@ export const DEFAULT_ENTRANCE_MOTION: EntranceMotionTemplate = {
   opacityEasing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
 };
 
+export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
+  motionBlur: {
+    enabled: false,
+    shutterAngle: 180,
+    strength: 1,
+  },
+};
+
 export const DEFAULT_SCATTER: ScatterSettings = {
   density: 1,
   minSpacing: 0.13,
@@ -77,7 +85,7 @@ function createComposition(id: string, name: string, width: number, height: numb
     name,
     width,
     height,
-    frameRate: 30,
+    frameRate: 24,
     seed,
     backgroundColor: "#B4492F",
     scatter: { ...DEFAULT_SCATTER },
@@ -118,6 +126,7 @@ export function createDefaultProject(): Project {
     comments: DEFAULT_COMMENTS,
     cardStyle: { ...DEFAULT_CARD_STYLE },
     entranceMotion: cloneValue(DEFAULT_ENTRANCE_MOTION),
+    renderSettings: cloneValue(DEFAULT_RENDER_SETTINGS),
     assets: [],
     compositions: [landscape, portrait],
     takes: [createTake("take-01", landscape, "Take 01"), createTake("take-portrait-01", portrait, "Portrait Take 01")],

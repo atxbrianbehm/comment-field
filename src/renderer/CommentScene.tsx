@@ -15,6 +15,7 @@ import {
   type Composition,
   type EntranceMotionTemplate,
   type GestureSample,
+  type RenderSettings,
   type Take,
   type Transform,
 } from "@comment-field/engine";
@@ -26,6 +27,7 @@ import {
   fieldPointAt,
   fitFrameWithinBounds,
   fittedOverviewCamera,
+  getSceneTelemetry,
   hitTestCard,
   normalizedCanvasPoint,
   renderPngBlob,
@@ -39,6 +41,7 @@ import {
   type RuntimeSelectionOverlay,
   type SceneController,
   type SceneRenderInput,
+  type PerformanceTelemetrySnapshot,
 } from "@comment-field/webgpu-runtime";
 
 export type InteractionMode = "select" | "record" | "reflow";
@@ -54,6 +57,7 @@ export interface CommentSceneHandle {
   hidePreview: () => void;
   endExport: () => void;
   fitField: () => void;
+  getPerformanceTelemetry: () => PerformanceTelemetrySnapshot | null;
 }
 
 interface CommentSceneProps {
@@ -62,6 +66,7 @@ interface CommentSceneProps {
   entranceMotion: EntranceMotionTemplate;
   comments: CommentRecord[];
   cardStyle: CardStyle;
+  renderSettings: RenderSettings;
   time: number;
   selectedCardId: string | null;
   mode: InteractionMode;
@@ -105,6 +110,7 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
     return {
       composition: current.composition, take: current.take, entranceMotion: current.entranceMotion,
       comments: current.comments, cardStyle: current.cardStyle, time,
+      renderSettings: current.renderSettings,
       selectedCardId: current.selectedCardId, mode: current.mode,
       viewMode: current.viewMode ?? "camera", showTransformHandles: current.showTransformHandles ?? false,
     };
@@ -237,6 +243,7 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
       endSceneExport(controller); paint();
     },
     fitField() { overviewCameraRef.current = fittedOverviewCamera(latestRef.current.composition); paint(); },
+    getPerformanceTelemetry() { return controllerRef.current ? getSceneTelemetry(controllerRef.current) : null; },
   }));
 
   function pointerDown(event: ReactPointerEvent<HTMLDivElement>) {

@@ -114,6 +114,7 @@ export function App() {
     entranceMotion: project.entranceMotion,
     comments: project.comments,
     cardStyle: project.cardStyle,
+    renderSettings: project.renderSettings,
     workspace,
     cacheStatus,
     sceneRef,
@@ -239,6 +240,7 @@ export function App() {
                   entranceMotion={project.entranceMotion}
                   comments={project.comments}
                   style={project.cardStyle}
+                  renderSettings={project.renderSettings}
                   time={time}
                   sceneRef={sceneRef}
                   onTimeChange={scrubTo}
@@ -248,7 +250,7 @@ export function App() {
                   onCacheStatus={setCacheStatus}
                   autoKey={autoKey}
                 />
-              : <HeroWorkspace composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} style={project.cardStyle} time={time} selectedCardId={take.hero?.cardId ?? selectedCardId} sceneRef={sceneRef} onTimeChange={scrubTo} onHeroChange={(hero) => mutateTake((draft) => { draft.hero = hero; })} onRemoveHero={removeHero} onBakeReflow={bakeReflow} onBack={() => setWorkspace("field")} onCacheStatus={setCacheStatus} autoKey={autoKey} />}
+              : <HeroWorkspace composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} style={project.cardStyle} renderSettings={project.renderSettings} time={time} selectedCardId={take.hero?.cardId ?? selectedCardId} sceneRef={sceneRef} onTimeChange={scrubTo} onHeroChange={(hero) => mutateTake((draft) => { draft.hero = hero; })} onRemoveHero={removeHero} onBakeReflow={bakeReflow} onBack={() => setWorkspace("field")} onCacheStatus={setCacheStatus} autoKey={autoKey} />}
         </div>
       )}
 

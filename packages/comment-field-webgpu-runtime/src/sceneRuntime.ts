@@ -3,6 +3,7 @@ import {
   compositionWorldDimensions,
   evaluateScene,
   fieldPointToWorld,
+  projectWorldPoint,
   unprojectScreenPoint,
   worldPointToField,
   type CameraPose,
@@ -10,12 +11,14 @@ import {
   type CommentRecord,
   type Composition,
   type EntranceMotionTemplate,
+  type RenderSettings,
   type Take,
 } from "@comment-field/engine";
 import { createCardTextureKey } from "./cardCache";
 import { createCardMaterial, setCardMaterialTexture, type CardMaterial } from "./cardMaterial.js";
 import { createCardTexture } from "./cardTexture";
 import { WebGPURenderer } from "./webgpuRenderer.js";
+import { createPerformanceTelemetry, type PerformanceTelemetryRecorder, type PerformanceTelemetrySnapshot } from "./performanceTelemetry";
 
 export interface RuntimeCacheStatus {
   state: "ready" | "rebuilding";
@@ -37,6 +40,7 @@ export interface SceneRenderInput {
   mode: "select" | "record" | "reflow";
   viewMode: "camera" | "overview";
   showTransformHandles: boolean;
+  renderSettings: RenderSettings;
 }
 
 export interface RuntimeSelectionOverlay {
@@ -66,6 +70,7 @@ export interface SceneController {
   exporting: boolean;
   previewTarget: THREE.RenderTarget | null;
   encodeCanvas: HTMLCanvasElement | null;
+  telemetry: PerformanceTelemetryRecorder;
 }
 
 export async function createSceneController() {
@@ -78,7 +83,11 @@ export async function createSceneController() {
   const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 100);
   const cards = new THREE.Group();
   scene.add(cards);
-  return { renderer, scene, camera, cards, meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null } satisfies SceneController;
+  return { renderer, scene, camera, cards, meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null, telemetry: createPerformanceTelemetry() } satisfies SceneController;
+}
+
+export function getSceneTelemetry(controller: SceneController): PerformanceTelemetrySnapshot {
+  return controller.telemetry.snapshot();
 }
 
 export function disposeSceneController(controller: SceneController) {
@@ -188,9 +197,16 @@ function fieldOverlay(controller: SceneController, input: SceneRenderInput, outp
 }
 
 export function renderScene(controller: SceneController, input: SceneRenderInput, overviewCamera: CameraPose, options: { target?: THREE.RenderTarget | null; clean?: boolean; production?: boolean } = {}) {
+  const startedAt = performance.now();
   const dimensions = compositionWorldDimensions(input.composition);
   const entrance = input.take.entranceOverride ?? input.entranceMotion;
   const state = evaluateScene(input.composition, input.take, entrance, input.time);
+  const motionBlur = input.renderSettings.motionBlur;
+  const shutterSeconds = motionBlur.enabled ? (motionBlur.shutterAngle / 360) / input.composition.frameRate : 0;
+  const previousState = shutterSeconds > 0 && input.time > 0
+    ? evaluateScene(input.composition, input.take, entrance, Math.max(0, input.time - shutterSeconds))
+    : null;
+  const previousCards = new Map(previousState?.cards.map((card) => [card.cardId, card]) ?? []);
   const renderCamera = input.viewMode === "overview" && !options.production && !options.target ? overviewCamera : state.camera;
   configureCamera(controller, input.composition, renderCamera);
   for (const card of state.cards) {
@@ -204,11 +220,27 @@ export function renderScene(controller: SceneController, input: SceneRenderInput
     mesh.material.cardUniforms.blur.value = card.blur;
     mesh.material.cardUniforms.selected.value = !options.clean && input.selectedCardId === card.cardId ? 1 : 0;
     mesh.material.cardUniforms.hero.value = input.take.hero?.cardId === card.cardId ? 1 : 0;
+    const previous = previousCards.get(card.cardId);
+    if (previous && input.viewMode !== "overview") {
+      const currentWorld = fieldPointToWorld(input.composition, card);
+      const previousWorld = fieldPointToWorld(input.composition, previous);
+      const currentScreen = projectWorldPoint(input.composition, state.camera, { ...currentWorld, z: card.z });
+      const previousScreen = projectWorldPoint(input.composition, previousState!.camera, { ...previousWorld, z: previous.z });
+      const strength = motionBlur.strength;
+      mesh.material.cardUniforms.motionX.value = THREE.MathUtils.clamp((currentScreen.x - previousScreen.x) * strength * 3, -0.12, 0.12);
+      mesh.material.cardUniforms.motionY.value = THREE.MathUtils.clamp((currentScreen.y - previousScreen.y) * strength * 3, -0.12, 0.12);
+      mesh.material.cardUniforms.motionAmount.value = Math.min(1, Math.hypot(currentScreen.x - previousScreen.x, currentScreen.y - previousScreen.y) * strength * 20);
+    } else {
+      mesh.material.cardUniforms.motionX.value = 0;
+      mesh.material.cardUniforms.motionY.value = 0;
+      mesh.material.cardUniforms.motionAmount.value = 0;
+    }
     mesh.renderOrder = card.layerPriority;
   }
   controller.renderer.setRenderTarget(options.target ?? null);
   controller.renderer.render(controller.scene, controller.camera);
   controller.renderer.setRenderTarget(null);
+  controller.telemetry.record("sceneRender", performance.now() - startedAt);
   return options.target ? { selection: null, field: null } : { selection: selectionOverlay(controller, input), field: fieldOverlay(controller, input, state.camera) };
 }
 
@@ -264,7 +296,9 @@ export function syncSceneAssets(controller: SceneController, input: Pick<SceneRe
       const comment = commentsById.get(placement.cardId);
       if (!comment) continue;
       const key = createCardTextureKey(comment, input.cardStyle);
+      const rasterStartedAt = performance.now();
       const rendered = createCardTexture(comment, input.cardStyle);
+      controller.telemetry.record("textureRaster", performance.now() - rasterStartedAt);
       const planeWidth = Math.min(dimensions.width * 0.24, 1.2);
       const geometry = new THREE.PlaneGeometry(planeWidth, planeWidth / rendered.aspect);
       const existing = controller.meshes.get(placement.cardId);
@@ -299,7 +333,9 @@ export async function renderPreviewBlob(controller: SceneController, input: Scen
     target.texture.colorSpace = THREE.SRGBColorSpace; controller.previewTarget = target;
   }
   renderScene(controller, { ...input, time: input.time }, overviewCamera, { target, clean: true, production: true });
+  const readbackStartedAt = performance.now();
   const pixels = await controller.renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height) as Uint8Array;
+  controller.telemetry.record("gpuReadback", performance.now() - readbackStartedAt);
   const rowBytes = width * 4;
   const sourceStride = pixels.length % height === 0 ? pixels.length / height : rowBytes;
   if (sourceStride < rowBytes) throw new Error("WebGPU preview readback returned an incomplete row");
@@ -310,5 +346,9 @@ export async function renderPreviewBlob(controller: SceneController, input: Scen
   const canvas = controller.encodeCanvas ?? document.createElement("canvas"); controller.encodeCanvas = canvas; canvas.width = width; canvas.height = height;
   const context = canvas.getContext("2d", { alpha: false }); if (!context) throw new Error("Preview encoder is unavailable");
   context.putImageData(new ImageData(flipped, width, height), 0, 0);
-  return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Preview frame encoding failed")), "image/webp", quality));
+  const encodeStartedAt = performance.now();
+  return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => {
+    controller.telemetry.record("frameEncode", performance.now() - encodeStartedAt);
+    blob ? resolve(blob) : reject(new Error("Preview frame encoding failed"));
+  }, "image/webp", quality));
 }

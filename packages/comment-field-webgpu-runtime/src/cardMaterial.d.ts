@@ -9,6 +9,9 @@ export interface CardMaterial extends THREE.Material {
     blur: MutableUniformNode;
     selected: MutableUniformNode;
     hero: MutableUniformNode;
+    motionX: MutableUniformNode;
+    motionY: MutableUniformNode;
+    motionAmount: MutableUniformNode;
   };
   cardTextures: MutableTextureNode[];
 }

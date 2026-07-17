@@ -9,6 +9,9 @@ export function createCardMaterial(texture) {
   const blur = TSL.uniform(0);
   const selected = TSL.uniform(0);
   const hero = TSL.uniform(0);
+  const motionX = TSL.uniform(0);
+  const motionY = TSL.uniform(0);
+  const motionAmount = TSL.uniform(0);
   const cardUv = TSL.uv();
   const spread = blur.mul(0.0016);
   const samples = [
@@ -17,6 +20,8 @@ export function createCardMaterial(texture) {
     TSL.texture(texture, cardUv.sub(TSL.vec2(spread, 0))),
     TSL.texture(texture, cardUv.add(TSL.vec2(0, spread))),
     TSL.texture(texture, cardUv.sub(TSL.vec2(0, spread))),
+    TSL.texture(texture, cardUv.add(TSL.vec2(motionX, motionY))),
+    TSL.texture(texture, cardUv.sub(TSL.vec2(motionX, motionY))),
   ];
   const composed = composeCard({
     center: samples[0],
@@ -24,8 +29,11 @@ export function createCardMaterial(texture) {
     negative_x: samples[2],
     positive_y: samples[3],
     negative_y: samples[4],
+    motion_positive: samples[5],
+    motion_negative: samples[6],
     card_uv: cardUv,
     blur_amount: blur,
+    motion_amount: motionAmount,
     selected_amount: selected,
     hero_amount: hero,
     opacity_amount: opacity,
@@ -34,7 +42,7 @@ export function createCardMaterial(texture) {
   material.colorNode = composed.rgb;
   material.opacityNode = composed.a;
   material.alphaTest = 0.01;
-  material.cardUniforms = { opacity, blur, selected, hero };
+  material.cardUniforms = { opacity, blur, selected, hero, motionX, motionY, motionAmount };
   material.cardTextures = samples;
   return material;
 }

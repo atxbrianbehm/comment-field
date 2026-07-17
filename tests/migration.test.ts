@@ -13,7 +13,7 @@ describe("project schema migration", () => {
     delete (legacy.cardStyle as Partial<typeof legacy.cardStyle>).showHandle;
     delete (legacy.cardStyle as Partial<typeof legacy.cardStyle>).showTimestamp;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(7);
+    expect(restored.version).toBe(8);
     expect(restored.cardStyle.strokeWidth).toBe(0);
     expect(restored.cardStyle.strokeColor).toBe("#1B1B18");
     expect(restored.cardStyle.showAvatar).toBe(true);
@@ -33,7 +33,7 @@ describe("project schema migration", () => {
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).driftSpeed;
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).driftRotation;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(7);
+    expect(restored.version).toBe(8);
     expect(restored.entranceMotion).toMatchObject({ springAmount: 0, springBounces: 0, springDamping: 0, driftAmount: 0, driftSpeed: 0, driftRotation: 0 });
   });
 
@@ -43,7 +43,7 @@ describe("project schema migration", () => {
     for (const composition of legacy.compositions) delete (composition as Partial<typeof composition>).fieldBounds;
     for (const take of legacy.takes) delete (take as Partial<typeof take>).cameraKeyframes;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(7);
+    expect(restored.version).toBe(8);
     expect(restored.compositions.every((composition) => composition.fieldBounds.width === 1 && composition.fieldBounds.height === 1)).toBe(true);
     expect(restored.takes.every((take) => take.cameraKeyframes.length === 0)).toBe(true);
     expect(evaluateCamera(restored.compositions[0], restored.takes[0], 3)).toEqual(restored.compositions[0].camera);
@@ -64,7 +64,7 @@ describe("project schema migration", () => {
       reflowDuration: 1.1, easing: "ease-out", reflowEasing: "ease-out",
     };
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(7);
+    expect(restored.version).toBe(8);
     expect(restored.takes.every((candidate) => candidate.duration === 12)).toBe(true);
     expect(restored.compositions.every((composition) => !("duration" in composition))).toBe(true);
     expect(restored.takes[0].hero?.keyframes).toHaveLength(2);
@@ -77,7 +77,18 @@ describe("project schema migration", () => {
     legacy.entranceMotion.easing = { x1: 0.65, y1: 0, x2: 0.35, y2: 1 };
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).opacityEasing;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(7);
+    expect(restored.version).toBe(8);
     expect(restored.entranceMotion.opacityEasing).toEqual(restored.entranceMotion.easing);
+  });
+
+  it("migrates schema-v7 projects with motion blur disabled and preserves authored frame rate", () => {
+    const legacy = createDefaultProject() as Project;
+    legacy.version = 7;
+    legacy.compositions[0].frameRate = 30;
+    delete (legacy as Partial<Project>).renderSettings;
+    const restored = deserializeProject(JSON.stringify(legacy));
+    expect(restored.version).toBe(8);
+    expect(restored.compositions[0].frameRate).toBe(30);
+    expect(restored.renderSettings.motionBlur).toEqual({ enabled: false, shutterAngle: 180, strength: 1 });
   });
 });

@@ -1,5 +1,5 @@
 import { PROJECT_VERSION, type Project, type Take } from "../models/types";
-import { DEFAULT_ENTRANCE_MOTION } from "../models/defaults";
+import { DEFAULT_ENTRANCE_MOTION, DEFAULT_RENDER_SETTINGS } from "../models/defaults";
 import { cloneValue } from "../utils/clone";
 
 export function serializeProject(project: Project): string {
@@ -19,6 +19,11 @@ export function migrateProject(project: Project): Project {
   const migrated = cloneValue(project);
   const legacyVersion = migrated.version;
   migrated.version = PROJECT_VERSION;
+  migrated.renderSettings ??= cloneValue(DEFAULT_RENDER_SETTINGS);
+  migrated.renderSettings.motionBlur ??= cloneValue(DEFAULT_RENDER_SETTINGS.motionBlur);
+  migrated.renderSettings.motionBlur.enabled ??= false;
+  migrated.renderSettings.motionBlur.shutterAngle ??= DEFAULT_RENDER_SETTINGS.motionBlur.shutterAngle;
+  migrated.renderSettings.motionBlur.strength ??= DEFAULT_RENDER_SETTINGS.motionBlur.strength;
   const legacyDurations = new Map<string, number>();
   for (const composition of migrated.compositions) {
     const legacyComposition = composition as CompositionWithLegacyDuration;
