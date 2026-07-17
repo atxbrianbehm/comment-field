@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "status": "verified",
+  "graphics": {
+    "requiredApi": "WebGPU",
+    "shaderLanguage": "WGSL",
+    "fallback": null,
+    "adapter": "@comment-field/webgpu-runtime",
+    "shader": "packages/comment-field-webgpu-runtime/src/shaders/card-composite.wgsl"
+  },
+  "boundaries": {
+    "engine": "@comment-field/engine",
+    "surface": "src/app",
+    "gpuAdapter": "@comment-field/webgpu-runtime",
+    "enforcedBy": "scripts/verify-architecture.mjs"
+  },
+  "limits": {
+    "productionLines": 400,
+    "testLines": 500
+  },
+  "verification": {
+    "command": "npm run verify",
+    "productionFilesChecked": 49,
+    "testFilesChecked": 2,
+    "testsPassing": 35,
+    "browserHash": "80d12bda",
+    "landscapeAccepted": true,
+    "portraitAccepted": true,
+    "portraitPreview": "240/240 at 540x960",
+    "helpSurfaceAccepted": true
+  },
+  "knownAdvisories": [
+    "The production JavaScript chunk exceeds Vite's 500 kB advisory threshold; add code splitting in the next performance pass."
+  ]
+}

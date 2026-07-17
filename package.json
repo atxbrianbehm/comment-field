@@ -9,6 +9,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck:engine": "tsc -p packages/comment-field-engine/tsconfig.json --pretty false",
+    "typecheck:runtime": "tsc -p packages/comment-field-webgpu-runtime/tsconfig.json --pretty false",
+    "verify:architecture": "node scripts/verify-architecture.mjs",
+    "verify": "npm run verify:architecture && npm run typecheck:engine && npm run typecheck:runtime && npm run test:run && npm run build",
     "test": "vitest",
     "test:run": "vitest run",
     "preview": "vite preview"
