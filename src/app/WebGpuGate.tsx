@@ -6,9 +6,11 @@ type WebGpuNavigator = Navigator & {
 };
 
 export function WebGpuGate({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<"checking" | "ready" | "unsupported">("checking");
+  const surfaceProof = import.meta.env.DEV && new URLSearchParams(window.location.search).has("surface-proof");
+  const [state, setState] = useState<"checking" | "ready" | "unsupported">(surfaceProof ? "ready" : "checking");
 
   useEffect(() => {
+    if (surfaceProof) return;
     let cancelled = false;
     const check = async () => {
       const gpu = (navigator as WebGpuNavigator).gpu;
@@ -22,7 +24,7 @@ export function WebGpuGate({ children }: { children: React.ReactNode }) {
     };
     void check();
     return () => { cancelled = true; };
-  }, []);
+  }, [surfaceProof]);
 
   if (state === "ready") return children;
   return <main className="webgpu-gate">

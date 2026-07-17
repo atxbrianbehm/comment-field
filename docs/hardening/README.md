@@ -24,15 +24,18 @@ The same command is a blocking step in the GitHub Pages deployment workflow.
 
 ## Current evidence
 
-- Architecture gate: 49 production files and 2 test files checked; no boundary drift or cycles.
-- Tests: 35 passing across deterministic behavior and migrations.
+- Architecture gate: 57 production files and 2 test files checked; no boundary drift or cycles.
+- Tests: 39 passing across deterministic behavior, migrations, performance profiles, motion blur, and progressive preview ordering.
 - Production build: successful with Vite 8.1.4.
-- Current known warning: the minified application chunk is about 1.18 MB (336 KB gzip), above Vite's advisory threshold. This is not a correctness failure, but code splitting should be the next delivery-performance pass.
+- Startup is split into a 186 KB bootstrap, a 56 KB authoring surface, lazy workspaces/export, and two sub-3 KB workers. The lazy Three.js/WebGPU runtime remains an 885 KB advisory chunk.
 - Browser deterministic verification after the final surface split produced hash `80d12bda` on the WebGPU renderer.
 - Both compositions passed live acceptance: landscape rendered through the production WebGPU path, and portrait completed all 240 RAM-preview frames at 540×960. The portrait pass also exercises padded WebGPU readback rows.
 - The help surface opens from the global toolbar and exposes Field, Design, and Animate guidance.
+- The 24 fps performance lane includes deterministic toggleable motion blur, worker card rasterization, a persistent 12 fps draft refined to exact 24 fps, worker WebCodecs decode, and adaptive phone/tablet/desktop density.
+- The responsive authoring shell passed a 390x844 surface capture with fixed Stage/Comments/Controls navigation and a compact shot timeline.
 
 See [architecture-map.md](./architecture-map.md) for ownership and [hardening-status.json](./hardening-status.json) for machine-readable status.
+See [performance-mobile.md](./performance-mobile.md) for the playback, worker, mobile, and atlas decisions.
 
 ## Refactor evidence
 

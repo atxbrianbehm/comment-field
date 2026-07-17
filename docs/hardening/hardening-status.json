@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "verified",
   "graphics": {
     "requiredApi": "WebGPU",
@@ -20,16 +20,23 @@
   },
   "verification": {
     "command": "npm run verify",
-    "productionFilesChecked": 49,
+    "productionFilesChecked": 57,
     "testFilesChecked": 2,
-    "testsPassing": 35,
-    "browserHash": "80d12bda",
+    "testsPassing": 39,
+    "browserHash": "f8d91cc0",
     "landscapeAccepted": true,
     "portraitAccepted": true,
     "portraitPreview": "240/240 at 540x960",
-    "helpSurfaceAccepted": true
+    "helpSurfaceAccepted": true,
+    "primaryPreviewFps": 24,
+    "motionBlurAccepted": true,
+    "workerRasterAccepted": "30/30 textures ready",
+    "progressiveRamAccepted": "RAM playback at 103/192 frames",
+    "mobileSurfaceAccepted": "390x844",
+    "previewDecodeWorker": "WebCodecs with ImageBitmap and main-thread fallbacks"
   },
   "knownAdvisories": [
-    "The production JavaScript chunk exceeds Vite's 500 kB advisory threshold; add code splitting in the next performance pass."
+    "The lazy Three.js WebGPU runtime chunk remains above Vite's 500 kB advisory threshold; startup and authoring workspaces are already split around it.",
+    "Texture atlasing is deferred until GPU timing identifies bind or draw submission as a 24 fps bottleneck."
   ]
 }

@@ -154,6 +154,11 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
 
       <aside className={`right-panel panel-scroll mobile-sheet ${mobilePanel === "controls" ? "is-open" : ""}`}>
         <button className="mobile-sheet-close" onClick={() => setMobilePanel("closed")}><span />Close</button>
+        <div className="mobile-mode-actions" aria-label="Field interaction mode">
+          <button className={mode === "select" ? "is-active" : ""} onClick={() => setMode("select")}><MousePointer2 size={16} />Arrange</button>
+          <button className={mode === "record" ? "is-active" : ""} onClick={() => { setMode(mode === "record" ? "select" : "record"); pausePlayback(); }}><CircleDot size={16} />Record</button>
+          <button className={mode === "reflow" ? "is-active" : ""} disabled={!take.hero} onClick={() => setMode(mode === "reflow" ? "select" : "reflow")}><Move3d size={16} />Reflow</button>
+        </div>
         <div className="panel-tabs"><button className={rightTab === "layout" ? "is-active" : ""} onClick={() => setRightTab("layout")}>Layout</button><button className={rightTab === "build" ? "is-active" : ""} onClick={() => setRightTab("build")}>Build</button><button className={rightTab === "hero" ? "is-active" : ""} onClick={() => setRightTab("hero")}>Hero</button></div>
         {rightTab === "layout" && <>
           <PanelSection title="Scatter field" meta="Deterministic">
