@@ -1,10 +1,6 @@
-import { openDB } from "idb";
 import { PROJECT_VERSION, type Project, type Take } from "../models/types";
 import { DEFAULT_ENTRANCE_MOTION } from "../models/defaults";
-
-const DB_NAME = "comment-field";
-const STORE_NAME = "projects";
-const ACTIVE_KEY = "active-project";
+import { cloneValue } from "../utils/clone";
 
 export function serializeProject(project: Project): string {
   return JSON.stringify({ ...project, updatedAt: new Date().toISOString() }, null, 2);
@@ -20,7 +16,7 @@ export function deserializeProject(source: string): Project {
 }
 
 export function migrateProject(project: Project): Project {
-  const migrated = structuredClone(project);
+  const migrated = cloneValue(project);
   const legacyVersion = migrated.version;
   migrated.version = PROJECT_VERSION;
   const legacyDurations = new Map<string, number>();
@@ -49,7 +45,7 @@ export function migrateProject(project: Project): Project {
           ? { x1: 0.65, y1: 0, x2: 0.35, y2: 1 }
           : { x1: 0.16, y1: 1, x2: 0.3, y2: 1 };
       return {
-        ...structuredClone(DEFAULT_ENTRANCE_MOTION),
+        ...cloneValue(DEFAULT_ENTRANCE_MOTION),
         duration: legacyBuild.duration ?? DEFAULT_ENTRANCE_MOTION.duration,
         fade: legacyBuild.fade ?? DEFAULT_ENTRANCE_MOTION.fade,
         blur: legacyBuild.blur ?? DEFAULT_ENTRANCE_MOTION.blur,
@@ -62,18 +58,18 @@ export function migrateProject(project: Project): Project {
         easing,
       };
     });
-    migrated.entranceMotion = legacyMotions[0] ?? structuredClone(DEFAULT_ENTRANCE_MOTION);
+    migrated.entranceMotion = legacyMotions[0] ?? cloneValue(DEFAULT_ENTRANCE_MOTION);
     migrated.takes.forEach((take, index) => {
       take.entranceOverride = JSON.stringify(legacyMotions[index]) === JSON.stringify(migrated.entranceMotion)
         ? undefined
         : legacyMotions[index];
     });
   } else {
-    migrated.entranceMotion ??= structuredClone(DEFAULT_ENTRANCE_MOTION);
+    migrated.entranceMotion ??= cloneValue(DEFAULT_ENTRANCE_MOTION);
   }
-  migrated.entranceMotion.opacityEasing ??= structuredClone(migrated.entranceMotion.easing);
+  migrated.entranceMotion.opacityEasing ??= cloneValue(migrated.entranceMotion.easing);
   for (const take of migrated.takes) {
-    if (take.entranceOverride) take.entranceOverride.opacityEasing ??= structuredClone(take.entranceOverride.easing);
+    if (take.entranceOverride) take.entranceOverride.opacityEasing ??= cloneValue(take.entranceOverride.easing);
   }
   if (legacyVersion < 4) {
     const preserveLegacyMotion = (motion: Project["entranceMotion"]) => {
@@ -153,23 +149,4 @@ type CompositionWithLegacyDuration = Project["compositions"][number] & { duratio
 
 function baseDirection(drift: number) {
   return drift;
-}
-
-async function database() {
-  return openDB(DB_NAME, 1, {
-    upgrade(db) {
-      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
-    },
-  });
-}
-
-export async function saveAutosave(project: Project) {
-  const db = await database();
-  await db.put(STORE_NAME, project, ACTIVE_KEY);
-}
-
-export async function loadAutosave(): Promise<Project | undefined> {
-  const db = await database();
-  const saved = await db.get(STORE_NAME, ACTIVE_KEY) as Project | undefined;
-  return saved ? migrateProject(saved) : undefined;
 }

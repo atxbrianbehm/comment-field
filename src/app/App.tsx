@@ -4,18 +4,33 @@ import {
   MousePointer2, Move3d, Palette, Pause, Play, Plus, RefreshCw, Save, Shield, Sparkles, Star,
   Trash2, Unlock, WandSparkles,
 } from "lucide-react";
-import { resolveBuildTriggers } from "../animation/build";
-import { settleCameraOnHero } from "../animation/camera";
-import { clearHeroPerformance, heroEndTime, heroStartTime } from "../animation/hero";
+import {
+  clearHeroPerformance,
+  createDefaultProject,
+  DEFAULT_ENTRANCE_MOTION,
+  DEFAULT_COMMENT_TEXT,
+  deserializeProject,
+  fitFieldBoundsToComments,
+  generateReflowTargets,
+  heroEndTime,
+  heroStartTime,
+  parseCommentJson,
+  parsePlainText,
+  regenerateComposition,
+  resolveBuildTriggers,
+  resolveGestureTriggers,
+  serializeProject,
+  settleCameraOnHero,
+  type BuildOrder,
+  type Composition,
+  type GestureSample,
+  type HeroPerformance,
+  type PreviewCacheStatus,
+  type Project,
+  type Take,
+} from "@comment-field/engine";
 import { exportPngSequence } from "../export/pngSequence";
-import { DEFAULT_COMMENT_TEXT } from "../fixtures/defaultComments";
-import { parseCommentJson, parsePlainText } from "../import/parseComments";
-import { fitFieldBoundsToComments, regenerateComposition } from "../layout/scatter";
-import { createDefaultProject, DEFAULT_ENTRANCE_MOTION } from "../models/defaults";
-import type { BuildOrder, Composition, GestureSample, HeroPerformance, PreviewCacheStatus, Project, Take } from "../models/types";
-import { deserializeProject, loadAutosave, saveAutosave, serializeProject } from "../persistence/projectStore";
-import { resolveGestureTriggers } from "../recording/gesture";
-import { generateReflowTargets } from "../reflow/reflow";
+import { loadAutosave, saveAutosave } from "../infrastructure/projectStore";
 import { CommentScene, type CacheStatus, type CommentSceneHandle, type InteractionMode, type TransformPatch } from "../renderer/CommentScene";
 import {
   choosePreviewDimensions,

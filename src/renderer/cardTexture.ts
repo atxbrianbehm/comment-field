@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { CardStyle, CommentRecord } from "../models/types";
+import type { CardStyle, CommentRecord } from "@comment-field/engine";
 
 function hexWithOpacity(hex: string, opacity: number) {
   const normalized = hex.replace("#", "");

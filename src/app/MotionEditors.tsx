@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import type { CubicBezierCurve, Point2D } from "../models/types";
+import type { CubicBezierCurve, Point2D } from "@comment-field/engine";
 
 type PathPointName = "start" | "control1" | "control2" | "end";
 

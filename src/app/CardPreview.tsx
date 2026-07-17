@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { CardStyle, CommentRecord } from "../models/types";
+import type { CardStyle, CommentRecord } from "@comment-field/engine";
 import { renderCardCanvas } from "../renderer/cardTexture";
 
 export function CardPreview({ comment, style, className = "" }: { comment: CommentRecord; style: CardStyle; className?: string }) {

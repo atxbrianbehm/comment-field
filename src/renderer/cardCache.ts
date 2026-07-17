@@ -1,4 +1,4 @@
-import type { CardStyle, CommentRecord } from "../models/types";
+import type { CardStyle, CommentRecord } from "@comment-field/engine";
 
 export function createCardTextureKey(comment: CommentRecord, style: CardStyle) {
   return JSON.stringify({ comment, style });

@@ -1,4 +1,4 @@
-import type { Point2D, SpatialBezierPath } from "../models/types";
+import type { Point2D, SpatialBezierPath } from "@comment-field/engine";
 
 export interface EntranceEditorViewport {
   centerY: number;

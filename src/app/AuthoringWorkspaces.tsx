@@ -1,10 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Camera, Copy, Pause, Play, Plus, RotateCcw, SkipBack, SkipForward, Trash2 } from "lucide-react";
-import { cameraFrameInField, compositionWorldDimensions, DEFAULT_CAMERA_EASING, evaluateCamera, fieldPointToWorld, projectWorldPoint, upsertCameraKeyframe } from "../animation/camera";
-import { findKeyframeAt, snapTime, sortKeyframes, upsertKeyframe } from "../animation/keyframes";
-import { heroStartTime, sortedHeroKeyframes } from "../animation/hero";
-import { evaluateEntranceComponents } from "../animation/motionDynamics";
-import type { CameraKeyframe, CameraPose, CardStyle, CommentRecord, Composition, EntranceMotionTemplate, HeroKeyframe, HeroPerformance, Point2D, Take } from "../models/types";
+import {
+  cameraFrameInField,
+  compositionWorldDimensions,
+  DEFAULT_CAMERA_EASING,
+  evaluateCamera,
+  evaluateEntranceComponents,
+  fieldPointToWorld,
+  findKeyframeAt,
+  heroStartTime,
+  projectWorldPoint,
+  snapTime,
+  sortedHeroKeyframes,
+  sortKeyframes,
+  upsertCameraKeyframe,
+  upsertKeyframe,
+  type CameraKeyframe,
+  type CameraPose,
+  type CardStyle,
+  type CommentRecord,
+  type Composition,
+  type EntranceMotionTemplate,
+  type HeroKeyframe,
+  type HeroPerformance,
+  type Point2D,
+  type Take,
+} from "@comment-field/engine";
 import { CommentScene, type CacheStatus, type CommentSceneHandle, type TransformPatch } from "../renderer/CommentScene";
 import { CardPreview } from "./CardPreview";
 import { BezierOverlay, CurveEditor } from "./MotionEditors";

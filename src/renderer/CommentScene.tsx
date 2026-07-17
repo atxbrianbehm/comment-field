@@ -1,8 +1,21 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
-import { evaluateScene } from "../animation/evaluateScene";
-import { compositionWorldDimensions, evaluateCamera, fieldPointToWorld, unprojectScreenPoint, worldPointToField } from "../animation/camera";
-import type { CameraPose, CardStyle, CommentRecord, Composition, EntranceMotionTemplate, GestureSample, Take, Transform } from "../models/types";
+import {
+  compositionWorldDimensions,
+  evaluateCamera,
+  evaluateScene,
+  fieldPointToWorld,
+  unprojectScreenPoint,
+  worldPointToField,
+  type CameraPose,
+  type CardStyle,
+  type CommentRecord,
+  type Composition,
+  type EntranceMotionTemplate,
+  type GestureSample,
+  type Take,
+  type Transform,
+} from "@comment-field/engine";
 import { createCardTextureKey } from "./cardCache";
 import { createCardMaterial, type CardMaterial } from "./cardMaterial";
 import { createCardTexture } from "./cardTexture";

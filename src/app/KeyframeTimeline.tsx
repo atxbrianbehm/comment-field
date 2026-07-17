@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, ChevronDown, ChevronUp, Minus, Plus, Sparkles } from "lucide-react";
-import { moveKeyframe, snapTime } from "../animation/keyframes";
-import type { CameraKeyframe, HeroKeyframe, Take } from "../models/types";
+import { moveKeyframe, snapTime, type CameraKeyframe, type HeroKeyframe, type Take } from "@comment-field/engine";
 
 interface KeyframeTimelineProps {
   take: Take;

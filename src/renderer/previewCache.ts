@@ -5,7 +5,7 @@ import type {
   EntranceMotionTemplate,
   PreviewCacheSettings,
   Take,
-} from "../models/types";
+} from "@comment-field/engine";
 
 export const DEFAULT_PREVIEW_CACHE_SETTINGS: PreviewCacheSettings = {
   idleDelayMs: 400,

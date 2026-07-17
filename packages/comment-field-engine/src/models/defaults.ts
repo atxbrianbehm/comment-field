@@ -1,6 +1,7 @@
 import { resolveBuildTriggers } from "../animation/build";
 import { DEFAULT_COMMENTS } from "../fixtures/defaultComments";
 import { generateScatter } from "../layout/scatter";
+import { cloneValue } from "../utils/clone";
 import type { BuildPerformance, CardStyle, Composition, EntranceMotionTemplate, Project, ScatterSettings, Take } from "./types";
 import { PROJECT_VERSION } from "./types";
 
@@ -116,7 +117,7 @@ export function createDefaultProject(): Project {
     name: "Papa Murphy's Comment Field",
     comments: DEFAULT_COMMENTS,
     cardStyle: { ...DEFAULT_CARD_STYLE },
-    entranceMotion: structuredClone(DEFAULT_ENTRANCE_MOTION),
+    entranceMotion: cloneValue(DEFAULT_ENTRANCE_MOTION),
     assets: [],
     compositions: [landscape, portrait],
     takes: [createTake("take-01", landscape, "Take 01"), createTake("take-portrait-01", portrait, "Portrait Take 01")],

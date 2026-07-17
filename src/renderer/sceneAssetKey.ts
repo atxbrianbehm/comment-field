@@ -1,4 +1,4 @@
-import type { CardStyle, CommentRecord, Composition } from "../models/types";
+import type { CardStyle, CommentRecord, Composition } from "@comment-field/engine";
 
 export function createSceneAssetKey(
   composition: Composition,

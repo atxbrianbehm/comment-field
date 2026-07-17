@@ -1,24 +1,41 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { unzipSync } from "fflate";
-import { resolveBuildTriggers } from "../src/animation/build";
-import { cubicPoint, evaluateBezierCurve, evaluateSpatialPath } from "../src/animation/bezier";
-import { evaluateScene } from "../src/animation/evaluateScene";
-import { evaluateCamera, fieldPointToWorld, projectWorldPoint, settleCameraOnHero } from "../src/animation/camera";
-import { clearHeroPerformance } from "../src/animation/hero";
-import { findKeyframeAt, moveKeyframe, segmentProgress, snapTime, upsertKeyframe } from "../src/animation/keyframes";
-import { evaluateAmbientDrift, evaluateEntranceComponents, evaluateSpringOffset } from "../src/animation/motionDynamics";
-import { createDefaultProject } from "../src/models/defaults";
-import type { HeroPerformance, Project, TimedKeyframe } from "../src/models/types";
-import { parseCommentJson, parsePlainText } from "../src/import/parseComments";
-import { generateScatter } from "../src/layout/scatter";
-import { resolveGestureTriggers } from "../src/recording/gesture";
-import { generateReflowTargets } from "../src/reflow/reflow";
+import {
+  clearHeroPerformance,
+  createDefaultProject,
+  cubicPoint,
+  deserializeProject,
+  evaluateAmbientDrift,
+  evaluateBezierCurve,
+  evaluateCamera,
+  evaluateEntranceComponents,
+  evaluateScene,
+  evaluateSpatialPath,
+  evaluateSpringOffset,
+  fieldPointToWorld,
+  findKeyframeAt,
+  generateReflowTargets,
+  generateScatter,
+  moveKeyframe,
+  parseCommentJson,
+  parsePlainText,
+  projectWorldPoint,
+  resolveBuildTriggers,
+  resolveGestureTriggers,
+  segmentProgress,
+  serializeProject,
+  settleCameraOnHero,
+  snapTime,
+  upsertKeyframe,
+  type HeroPerformance,
+  type Project,
+  type TimedKeyframe,
+} from "@comment-field/engine";
 import { exportPngSequence } from "../src/export/pngSequence";
 import { fitFrameWithinBounds } from "../src/renderer/frameSizing";
 import { createSceneAssetKey } from "../src/renderer/sceneAssetKey";
 import { createCardTextureKey } from "../src/renderer/cardCache";
 import { avatarInitialForComment } from "../src/renderer/cardTexture";
-import { deserializeProject, serializeProject } from "../src/persistence/projectStore";
 import { editorPointToMotion, frameEntrancePath, motionPointToEditor } from "../src/app/motionViewport";
 import {
   choosePreviewDimensions,
