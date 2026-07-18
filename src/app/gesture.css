@@ -1,0 +1,12 @@
+.gesture-path-overlay { position: absolute; left: 50%; top: 50%; z-index: 5; translate: -50% -50%; overflow: visible; pointer-events: none; }
+.gesture-path-overlay polyline { fill: none; stroke: rgba(105,214,180,.86); stroke-width: 2; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.gesture-path-point { pointer-events: auto; cursor: grab; touch-action: none; outline: none; }
+.gesture-path-point:active { cursor: grabbing; }
+.gesture-path-hit { fill: transparent; }
+.gesture-path-dot { fill: #171a16; stroke: var(--mint); stroke-width: 2.5; transition: r 120ms ease, fill 120ms ease, stroke 120ms ease; }
+.gesture-path-point.is-past .gesture-path-dot { fill: var(--mint); }
+.gesture-path-point.is-selected .gesture-path-dot { r: 8px; fill: var(--lime); stroke: #171a16; }
+.gesture-path-point text { fill: #ecebe4; font: 700 9px "DM Mono", monospace; text-anchor: middle; paint-order: stroke; stroke: #171a16; stroke-width: 4px; stroke-linejoin: round; }
+.gesture-key-marker { position: absolute; z-index: 7; top: 0; width: 40px; height: 31px; translate: -20px 0; padding: 0; border: 0; background: transparent; touch-action: none; }
+.gesture-key-marker::before { content: ""; position: absolute; left: 15px; top: 11px; width: 10px; height: 10px; rotate: 45deg; border-radius: 2px; background: var(--lime); box-shadow: 0 2px 4px rgba(0,0,0,.35); }
+.gesture-key-marker.is-selected::before { scale: 1.3; box-shadow: 0 0 0 3px rgba(204,232,106,.18); }

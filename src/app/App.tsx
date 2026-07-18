@@ -11,6 +11,7 @@ import {
   DEFAULT_ENTRANCE_MOTION,
   DEFAULT_COMMENT_TEXT,
   deserializeProject,
+  editGestureSample,
   fitFieldBoundsToComments,
   generateReflowTargets,
   heroEndTime,
@@ -61,6 +62,7 @@ export function App() {
   const [activeCompositionId, setActiveCompositionId] = useState("comp-landscape");
   const [activeTakeId, setActiveTakeId] = useState("take-01");
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [selectedGestureIndex, setSelectedGestureIndex] = useState<number | null>(null);
   const [mode, setMode] = useState<InteractionMode>("select");
   const [workspace, setWorkspace] = useState<"field" | "design" | "animate">("field");
   const [animateTab, setAnimateTab] = useState<"entrance" | "camera" | "hero">("entrance");
@@ -107,6 +109,13 @@ export function App() {
       if (target) updater(target);
     });
   }, [mutateProject, take?.id]);
+
+  const updateGestureSample = useCallback((index: number, patch: Partial<GestureSample>) => {
+    mutateTake((draft) => {
+      draft.gestureSamples = editGestureSample(draft.gestureSamples, index, patch, composition.frameRate);
+      draft.cardTriggers = resolveGestureTriggers(draft.gestureSamples, composition.cards, 0.16, composition, draft);
+    });
+  }, [composition, mutateTake]);
 
   const {
     time, playing, previewStatus, clearPreviewCache, pausePlayback, togglePlayback,
@@ -161,6 +170,10 @@ export function App() {
     if (takes.length && !takes.some((item) => item.id === activeTakeId)) setActiveTakeId(takes[0].id);
   }, [activeCompositionId, activeTakeId, takes]);
 
+  useEffect(() => {
+    if (selectedGestureIndex !== null && !take?.gestureSamples[selectedGestureIndex]) setSelectedGestureIndex(null);
+  }, [selectedGestureIndex, take?.id, take?.gestureSamples.length]);
+
   if (!composition || !take || !representativeComment) return <main className="loading-state">Opening Comment Field…</main>;
 
   const previewLabel = previewStatus.state === "ready"
@@ -199,6 +212,7 @@ export function App() {
       {workspace === "field" && <FieldWorkspace
         project={project} composition={composition} take={take} duration={duration} time={time} playing={playing}
         commentSource={commentSource} commentPreview={commentPreview} selectedCardId={selectedCardId}
+        selectedGestureIndex={selectedGestureIndex} setSelectedGestureIndex={setSelectedGestureIndex}
         selectedPlacement={selectedPlacement} selectedComment={selectedComment} mode={mode} fieldView={fieldView}
         rightTab={rightTab} cacheStatus={cacheStatus} previewStatus={previewStatus} previewLabel={previewLabel}
         previewMemory={previewMemory} sceneRef={sceneRef} setCommentSource={setCommentSource}
@@ -208,7 +222,8 @@ export function App() {
         importComments={importComments} loadCommentFile={loadCommentFile} loadBackground={loadBackground}
         switchComposition={switchComposition} changeTakeDuration={changeTakeDuration} clearPreviewCache={clearPreviewCache}
         pausePlayback={pausePlayback} beginManipulation={beginManipulation} transformCard={transformCard}
-        completeGesture={completeGesture} scatter={scatter} fitFieldToComments={fitFieldToComments}
+        completeGesture={(samples) => { completeGesture(samples); setSelectedGestureIndex(samples.length ? 0 : null); }}
+        updateGestureSample={updateGestureSample} scatter={scatter} fitFieldToComments={fitFieldToComments}
         addProtectedRegion={addProtectedRegion} removeHero={removeHero} setHero={setHero} updateBuild={updateBuild}
         randomizeBuild={randomizeBuild} alignCameraToHero={alignCameraToHero} bakeReflow={bakeReflow}
       />}
@@ -263,7 +278,7 @@ export function App() {
       <footer className="transport">
         <button className="play-button" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"}><span className={playing ? "icon-state visible" : "icon-state"}><Pause size={18} /></span><span className={!playing ? "icon-state visible play-icon" : "icon-state play-icon"}><Play size={18} /></span></button>
         <div className="timecode">{formatTimecode(time, composition.frameRate)}<span> / {formatTimecode(duration, composition.frameRate)}</span>{cachedPlaybackActive && <em>RAM</em>}</div>
-        <KeyframeTimeline take={take} frameRate={composition.frameRate} time={time} previewProgress={previewProgress} expanded={workspace === "animate"} autoKey={autoKey} onAutoKeyChange={setAutoKey} onTimeChange={scrubTo} onDurationChange={changeTakeDuration} onCameraChange={(cameraKeyframes) => mutateTake((draft) => { draft.cameraKeyframes = cameraKeyframes; })} onHeroChange={(keyframes) => mutateTake((draft) => { if (draft.hero) draft.hero.keyframes = keyframes; })} />
+        <KeyframeTimeline take={take} frameRate={composition.frameRate} time={time} previewProgress={previewProgress} expanded={workspace === "animate"} autoKey={autoKey} selectedGestureIndex={selectedGestureIndex} onGestureSelect={setSelectedGestureIndex} onGestureChange={updateGestureSample} onAutoKeyChange={setAutoKey} onTimeChange={scrubTo} onDurationChange={changeTakeDuration} onCameraChange={(cameraKeyframes) => mutateTake((draft) => { draft.cameraKeyframes = cameraKeyframes; })} onHeroChange={(keyframes) => mutateTake((draft) => { if (draft.hero) draft.hero.keyframes = keyframes; })} />
         <div className="take-controls">
           <IconButton label={take.favorite ? "Unfavorite take" : "Favorite take"} active={take.favorite} onClick={() => mutateTake((draft) => { draft.favorite = !draft.favorite; })}><Star size={15} fill={take.favorite ? "currentColor" : "none"} /></IconButton>
           <input className="take-name" value={take.name} onChange={(event) => mutateTake((draft) => { draft.name = event.target.value; })} aria-label="Take name" />

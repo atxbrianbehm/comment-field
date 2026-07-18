@@ -4,6 +4,9 @@
   html, body, #root { width: 100%; height: 100%; height: 100dvh; overflow: hidden; }
   body { min-width: 0; overscroll-behavior: none; }
   button, input, select, textarea { touch-action: manipulation; }
+  .mobile-sheet { overscroll-behavior: contain; touch-action: pan-y; }
+  .slider-control input[type="range"], .scrubber-wrap > input { min-height: 44px; touch-action: none; }
+  .slider-control input[type="range"]::-webkit-slider-thumb { width: 22px; height: 22px; margin-top: -9.5px; }
 
   .app-shell, .app-shell.workspace-animate {
     height: 100dvh;

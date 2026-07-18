@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, ChevronDown, ChevronUp, Minus, Plus, Sparkles } from "lucide-react";
-import { moveKeyframe, snapTime, type CameraKeyframe, type HeroKeyframe, type Take } from "@comment-field/engine";
+import { Camera, ChevronDown, ChevronUp, CircleDot, Minus, Plus, Sparkles } from "lucide-react";
+import { moveKeyframe, snapTime, type CameraKeyframe, type GestureSample, type HeroKeyframe, type Take } from "@comment-field/engine";
 
 interface KeyframeTimelineProps {
   take: Take;
@@ -9,6 +9,9 @@ interface KeyframeTimelineProps {
   previewProgress: number;
   expanded: boolean;
   autoKey: boolean;
+  selectedGestureIndex: number | null;
+  onGestureSelect: (index: number | null) => void;
+  onGestureChange: (index: number, patch: Partial<GestureSample>) => void;
   onAutoKeyChange: (enabled: boolean) => void;
   onTimeChange: (time: number) => void;
   onDurationChange: (duration: number) => void;
@@ -46,6 +49,7 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
     take.duration,
     ...take.cameraKeyframes.map((keyframe) => keyframe.time),
     ...heroKeys.map((keyframe) => keyframe.time),
+    ...take.gestureSamples.map((sample) => sample.time),
     ...take.cardTriggers.map((trigger) => trigger.triggerTime),
   );
   const visibleDuration = Math.max(take.duration + 1, latestEvent + 1);
@@ -85,6 +89,15 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
     });
   }
 
+  function dragGesturePoint(event: React.PointerEvent, index: number) {
+    event.stopPropagation();
+    props.onGestureSelect(index);
+    dragTime(event, (nextTime) => {
+      props.onGestureChange(index, { time: nextTime });
+      props.onTimeChange(nextTime);
+    });
+  }
+
   function commitDuration(value: string) {
     const parsed = parseTimecode(value, frameRate);
     if (parsed !== null) props.onDurationChange(Math.max(1 / frameRate, parsed));
@@ -101,7 +114,7 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
         <span className="timeline-expand-label">{expanded ? <><ChevronDown size={14} />Camera + Hero</> : <><ChevronUp size={14} />Open Animate for tracks</>}</span>
       </header>
       <div className="dopesheet-body">
-        {expanded && <div className="dopesheet-labels"><div className="ruler-label">Tracks</div><div><Camera size={14} />Camera</div><div><Sparkles size={14} />Hero</div></div>}
+        {expanded && <div className="dopesheet-labels"><div className="ruler-label">Tracks</div><div><Camera size={14} />Camera</div><div><Sparkles size={14} />Hero</div><div><CircleDot size={14} />Build path</div></div>}
         <div className="dopesheet-scroll" ref={scrollRef}>
           <div className="dopesheet-content" style={{ width: contentWidth }} onPointerDown={(event) => dragTime(event, props.onTimeChange)}>
             <div className="dopesheet-ruler">{ticks.map((tick) => <span key={tick} style={{ left: tick * pixelsPerSecond }}><i />{tick}s</span>)}</div>
@@ -110,7 +123,9 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
             {expanded && <>
               <div className="dopesheet-row camera-row">{take.cameraKeyframes.map((keyframe) => <button key={keyframe.id} className={`key-diamond ${selectedId === keyframe.id ? "is-selected" : ""} ${keyframe.time > take.duration ? "is-overflow" : ""}`} style={{ left: keyframe.time * pixelsPerSecond }} onPointerDown={(event) => dragKey(event, "camera", keyframe.id)} onClick={() => props.onTimeChange(keyframe.time)} aria-label={`Camera key at ${formatTimecode(keyframe.time, frameRate)}`} />)}</div>
               <div className="dopesheet-row hero-row">{heroKeys.map((keyframe) => <button key={keyframe.id} className={`key-diamond ${keyframe.value.kind === "source" ? "is-source" : ""} ${selectedId === keyframe.id ? "is-selected" : ""} ${keyframe.time > take.duration ? "is-overflow" : ""}`} style={{ left: keyframe.time * pixelsPerSecond }} onPointerDown={(event) => dragKey(event, "hero", keyframe.id)} onClick={() => props.onTimeChange(keyframe.time)} aria-label={`Hero key at ${formatTimecode(keyframe.time, frameRate)}`} />)}</div>
+              <div className="dopesheet-row gesture-row">{take.gestureSamples.map((sample, index) => <button key={`${index}-${sample.time}`} className={`key-diamond gesture-key ${props.selectedGestureIndex === index ? "is-selected" : ""} ${sample.time > take.duration ? "is-overflow" : ""}`} style={{ left: sample.time * pixelsPerSecond }} onPointerDown={(event) => dragGesturePoint(event, index)} onClick={() => { props.onGestureSelect(index); props.onTimeChange(sample.time); }} aria-label={`Build path point ${index + 1} at ${formatTimecode(sample.time, frameRate)}`} />)}</div>
             </>}
+            {!expanded && take.gestureSamples.map((sample, index) => <button key={`${index}-${sample.time}`} className={`gesture-key-marker ${props.selectedGestureIndex === index ? "is-selected" : ""}`} style={{ left: sample.time * pixelsPerSecond }} onPointerDown={(event) => dragGesturePoint(event, index)} onClick={() => { props.onGestureSelect(index); props.onTimeChange(sample.time); }} aria-label={`Build path point ${index + 1} at ${formatTimecode(sample.time, frameRate)}`} />)}
             <div className="timeline-playhead" style={{ left: Math.min(time, visibleDuration) * pixelsPerSecond }}><i /></div>
             <button className="shot-outpoint" style={{ left: take.duration * pixelsPerSecond }} onPointerDown={(event) => dragTime(event, (next) => props.onDurationChange(Math.max(1 / frameRate, next)))} aria-label="Drag shot out point"><i /></button>
           </div>

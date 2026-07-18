@@ -10,14 +10,7 @@ import {
 import {
   compositionWorldDimensions,
   type CameraPose,
-  type CardStyle,
-  type CommentRecord,
-  type Composition,
-  type EntranceMotionTemplate,
   type GestureSample,
-  type RenderSettings,
-  type Take,
-  type Transform,
 } from "@comment-field/engine";
 import {
   beginSceneExport,
@@ -37,48 +30,14 @@ import {
   selectPerformanceProfile,
   setSceneBackground,
   syncSceneAssets,
-  type RuntimeCacheStatus,
   type RuntimeFieldOverlay,
   type RuntimeSelectionOverlay,
   type SceneController,
   type SceneRenderInput,
-  type PerformanceTelemetrySnapshot,
 } from "@comment-field/webgpu-runtime";
-
-export type InteractionMode = "select" | "record" | "reflow";
-export type TransformPatch = Partial<Pick<Transform, "x" | "y" | "scale" | "rotation">>;
-export type CacheStatus = RuntimeCacheStatus;
-
-export interface CommentSceneHandle {
-  beginExport: (width: number, height: number) => void;
-  renderFrame: (time: number, width: number, height: number) => Promise<Blob>;
-  renderLiveFrame: (time: number) => void;
-  renderPreviewFrame: (time: number, width: number, height: number, quality: number) => Promise<Blob>;
-  showPreviewBitmap: (bitmap: ImageBitmap) => void;
-  hidePreview: () => void;
-  endExport: () => void;
-  fitField: () => void;
-  getPerformanceTelemetry: () => PerformanceTelemetrySnapshot | null;
-}
-
-interface CommentSceneProps {
-  composition: Composition;
-  take: Take;
-  entranceMotion: EntranceMotionTemplate;
-  comments: CommentRecord[];
-  cardStyle: CardStyle;
-  renderSettings: RenderSettings;
-  time: number;
-  selectedCardId: string | null;
-  mode: InteractionMode;
-  showTransformHandles?: boolean;
-  onSelect: (cardId: string | null) => void;
-  onTransformCard: (cardId: string, patch: TransformPatch, editReflow: boolean) => void;
-  onGestureComplete: (samples: GestureSample[]) => void;
-  onCacheStatus?: (status: CacheStatus) => void;
-  onManipulationStart?: () => void;
-  viewMode?: "camera" | "overview";
-}
+import { GesturePathOverlay, TransformOverlay } from "./SceneInteractionOverlays";
+import type { CommentSceneHandle, CommentSceneProps, TransformPatch } from "./CommentSceneTypes";
+export type { CacheStatus, CommentSceneHandle, InteractionMode, TransformPatch } from "./CommentSceneTypes";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -101,6 +60,7 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
   const activePointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ distance: number; midpoint: { x: number; y: number } } | null>(null);
   const gestureRef = useRef<{ start: number; samples: GestureSample[] } | null>(null);
+  const gesturePointRef = useRef<number | null>(null);
   const pendingMoveRef = useRef<{ cardId: string; patch: TransformPatch; editReflow: boolean } | null>(null);
   const moveFrameRef = useRef<number | null>(null);
   const manipulationRef = useRef<{
@@ -296,6 +256,11 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
   function pointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const controller = controllerRef.current;
     if (!controller) return;
+    if (gesturePointRef.current !== null) {
+      const point = normalizedCanvasPoint(controller, event.clientX, event.clientY);
+      latestRef.current.onGestureSampleChange?.(gesturePointRef.current, point);
+      return;
+    }
     if (activePointersRef.current.has(event.pointerId)) activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pinchRef.current && activePointersRef.current.size >= 2) {
       const points = [...activePointersRef.current.values()].slice(0, 2);
@@ -355,7 +320,7 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
     if (activePointersRef.current.size < 2) pinchRef.current = null;
     if (gestureRef.current) latestRef.current.onGestureComplete(gestureRef.current.samples);
     if (moveFrameRef.current !== null) cancelAnimationFrame(moveFrameRef.current);
-    moveFrameRef.current = null; flushPendingMove(); gestureRef.current = null; dragRef.current = null;
+    moveFrameRef.current = null; flushPendingMove(); gestureRef.current = null; gesturePointRef.current = null; dragRef.current = null;
     overviewPanRef.current = null; manipulationRef.current = null;
   }
 
@@ -380,6 +345,15 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
       startScale: selected.scale, startRotation: selected.rotation };
   }
 
+  function beginGesturePointManipulation(index: number, event: ReactPointerEvent<SVGGElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    gesturePointRef.current = index;
+    latestRef.current.onSelectGestureSample?.(index);
+    latestRef.current.onManipulationStart?.();
+  }
+
   return <div ref={mountRef} className={`scene-mount scene-mode-${props.mode}`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onWheel={wheel}>
     {!runtimeReady && <div className={`runtime-status ${runtimeError ? "is-error" : ""}`} role="status"><strong>{runtimeError ? "WebGPU unavailable" : "Starting WebGPU"}</strong><span>{runtimeError ?? "Requesting a current-generation graphics device..."}</span></div>}
     {fieldOverlay && <svg className="field-map-overlay" aria-hidden="true" width={frameSize.width} height={frameSize.height} viewBox={`0 0 ${frameSize.width} ${frameSize.height}`}>
@@ -388,11 +362,7 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
       {fieldOverlay.camera.length > 0 && <polygon className="camera-frame-vector" points={fieldOverlay.camera.map((point) => `${point.x},${point.y}`).join(" ")} />}
     </svg>}
     <canvas ref={previewCanvasRef} className="ram-preview-canvas" aria-label="Cached playback preview" style={{ width: frameSize.width, height: frameSize.height }} />
-    {selectionOverlay && <svg className={`transform-overlay ${selectionOverlay.locked ? "is-locked" : ""}`} width={frameSize.width} height={frameSize.height} viewBox={`0 0 ${frameSize.width} ${frameSize.height}`}>
-      <polygon points={selectionOverlay.points.map((point) => `${point.x},${point.y}`).join(" ")} /><line x1={selectionOverlay.center.x} y1={selectionOverlay.center.y} x2={selectionOverlay.rotationHandle.x} y2={selectionOverlay.rotationHandle.y} />
-      {selectionOverlay.points.map((point, index) => <g key={index} className="transform-handle scale-handle" transform={`translate(${point.x} ${point.y})`} onPointerDown={(event) => beginHandleManipulation("scale", event)}><circle className="transform-hit" r="24" /><rect x="-6" y="-6" width="12" height="12" rx="3" /></g>)}
-      <g className="transform-handle rotate-handle" transform={`translate(${selectionOverlay.rotationHandle.x} ${selectionOverlay.rotationHandle.y})`} onPointerDown={(event) => beginHandleManipulation("rotate", event)}><circle className="transform-hit" r="24" /><circle r="7" /></g>
-      {selectionOverlay.locked && <text x={selectionOverlay.center.x} y={selectionOverlay.center.y}>Locked</text>}
-    </svg>}
+    {props.showGesturePath && props.take.gestureSamples.length > 0 && <GesturePathOverlay samples={props.take.gestureSamples} selectedIndex={props.selectedGestureIndex} time={props.time} width={frameSize.width} height={frameSize.height} onBegin={beginGesturePointManipulation} />}
+    {selectionOverlay && <TransformOverlay overlay={selectionOverlay} width={frameSize.width} height={frameSize.height} onBegin={beginHandleManipulation} />}
   </div>;
 });

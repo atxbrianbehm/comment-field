@@ -27,6 +27,7 @@ interface FieldWorkspaceProps {
   commentSource: string;
   commentPreview: ParseResult;
   selectedCardId: string | null;
+  selectedGestureIndex: number | null;
   selectedPlacement: CardPlacement | null;
   selectedComment: CommentRecord | null;
   mode: InteractionMode;
@@ -39,6 +40,7 @@ interface FieldWorkspaceProps {
   sceneRef: RefObject<CommentSceneHandle | null>;
   setCommentSource: Dispatch<SetStateAction<string>>;
   setSelectedCardId: Dispatch<SetStateAction<string | null>>;
+  setSelectedGestureIndex: Dispatch<SetStateAction<number | null>>;
   setMode: Dispatch<SetStateAction<InteractionMode>>;
   setFieldView: Dispatch<SetStateAction<FieldView>>;
   setRightTab: Dispatch<SetStateAction<RightTab>>;
@@ -58,6 +60,7 @@ interface FieldWorkspaceProps {
   beginManipulation: () => void;
   transformCard: (cardId: string, patch: TransformPatch, editReflow: boolean) => void;
   completeGesture: (samples: GestureSample[]) => void;
+  updateGestureSample: (index: number, patch: Partial<GestureSample>) => void;
   scatter: () => void;
   fitFieldToComments: () => void;
   addProtectedRegion: () => void;
@@ -72,12 +75,12 @@ interface FieldWorkspaceProps {
 export function FieldWorkspace(props: FieldWorkspaceProps) {
   const [mobilePanel, setMobilePanel] = useState<"closed" | "comments" | "controls">("closed");
   const {
-    project, composition, take, duration, time, playing, commentSource, commentPreview, selectedCardId,
+    project, composition, take, duration, time, playing, commentSource, commentPreview, selectedCardId, selectedGestureIndex,
     selectedPlacement, selectedComment, mode, fieldView, rightTab, cacheStatus, previewStatus, previewLabel,
-    previewMemory, sceneRef, setCommentSource, setSelectedCardId, setMode, setFieldView, setRightTab, setWorkspace,
+    previewMemory, sceneRef, setCommentSource, setSelectedCardId, setSelectedGestureIndex, setMode, setFieldView, setRightTab, setWorkspace,
     setAnimateTab, setCacheStatus, mutateProject, mutateComposition, mutateTake, importComments, loadCommentFile,
     loadBackground, switchComposition, changeTakeDuration, clearPreviewCache, pausePlayback, beginManipulation,
-    transformCard, completeGesture, scatter, fitFieldToComments, addProtectedRegion, removeHero, setHero, updateBuild,
+    transformCard, completeGesture, updateGestureSample, scatter, fitFieldToComments, addProtectedRegion, removeHero, setHero, updateBuild,
     randomizeBuild, alignCameraToHero, bakeReflow,
   } = props;
   const telemetry = sceneRef.current?.getPerformanceTelemetry();
@@ -147,7 +150,7 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
         </div>
         <div className="stage-wrap">
           <div className="stage-grid" />
-          <CommentScene ref={sceneRef} composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} cardStyle={project.cardStyle} renderSettings={project.renderSettings} time={time} selectedCardId={selectedCardId} mode={mode} viewMode={playing ? "camera" : fieldView} showTransformHandles onSelect={setSelectedCardId} onTransformCard={transformCard} onGestureComplete={completeGesture} onCacheStatus={setCacheStatus} onManipulationStart={beginManipulation} />
+          <CommentScene ref={sceneRef} composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} cardStyle={project.cardStyle} renderSettings={project.renderSettings} time={time} selectedCardId={selectedCardId} selectedGestureIndex={selectedGestureIndex} mode={mode} viewMode={playing ? "camera" : fieldView} showTransformHandles showGesturePath={rightTab === "build"} onSelect={setSelectedCardId} onSelectGestureSample={setSelectedGestureIndex} onGestureSampleChange={updateGestureSample} onTransformCard={transformCard} onGestureComplete={completeGesture} onCacheStatus={setCacheStatus} onManipulationStart={beginManipulation} />
           {mode === "record" && <div className="record-hint"><CircleDot size={13} />Drag a path across the field</div>}
         </div>
       </section>
@@ -202,7 +205,24 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
           <button className="accent-button wide" onClick={() => { setWorkspace("animate"); setAnimateTab("entrance"); }}><Clapperboard size={16} />Edit entrance template</button>
           <button className="secondary-button wide" onClick={randomizeBuild}><Sparkles size={16} />Randomize triggers</button>
           <button className={`record-button wide ${mode === "record" ? "is-recording" : ""}`} onClick={() => { setMode(mode === "record" ? "select" : "record"); pausePlayback(); }}><CircleDot size={16} />{mode === "record" ? "Recording: draw in viewer" : "Record mouse build"}</button>
-        </PanelSection><PanelSection title="Take notes"><textarea className="take-notes" value={take.notes ?? ""} placeholder="Timing notes, alternates, review flags…" onChange={(event) => mutateTake((draft) => { draft.notes = event.target.value; })} /></PanelSection></>}
+        </PanelSection>
+        {take.gestureSamples.length > 0 && <PanelSection title="Recorded path" meta={selectedGestureIndex === null ? `${take.gestureSamples.length} points` : `Point ${selectedGestureIndex + 1}/${take.gestureSamples.length}`}>
+          <p className="panel-explainer">Tap a point in the viewer or its diamond in the timeline, then art-direct its screen position and arrival time.</p>
+          {selectedGestureIndex === null ? <button className="secondary-button wide" onClick={() => setSelectedGestureIndex(0)}>Select first point</button> : (() => {
+            const sample = take.gestureSamples[selectedGestureIndex];
+            if (!sample) return null;
+            return <>
+              <Slider label="Point time" min={0} max={duration} step={1 / composition.frameRate} value={sample.time} display={`${sample.time.toFixed(2)}s`} onChange={(event) => updateGestureSample(selectedGestureIndex, { time: Number(event.target.value) })} />
+              <Slider label="Screen X" min={0} max={1} step={0.005} value={sample.x} display={`${Math.round(sample.x * 100)}%`} onChange={(event) => updateGestureSample(selectedGestureIndex, { x: Number(event.target.value) })} />
+              <Slider label="Screen Y" min={0} max={1} step={0.005} value={sample.y} display={`${Math.round(sample.y * 100)}%`} onChange={(event) => updateGestureSample(selectedGestureIndex, { y: Number(event.target.value) })} />
+              <div className="button-pair">
+                <button className="secondary-button" disabled={selectedGestureIndex <= 0} onClick={() => setSelectedGestureIndex(selectedGestureIndex - 1)}>Previous point</button>
+                <button className="secondary-button" disabled={selectedGestureIndex >= take.gestureSamples.length - 1} onClick={() => setSelectedGestureIndex(selectedGestureIndex + 1)}>Next point</button>
+              </div>
+            </>;
+          })()}
+        </PanelSection>}
+        <PanelSection title="Take notes"><textarea className="take-notes" value={take.notes ?? ""} placeholder="Timing notes, alternates, review flags…" onChange={(event) => mutateTake((draft) => { draft.notes = event.target.value; })} /></PanelSection></>}
         {rightTab === "build" && <PanelSection title="Opacity curve" meta="Shared globally">
           <p className="panel-explainer">Shape the fade independently from position, scale, rotation, depth, and blur.</p>
           <Slider label="Fade amount" min={0} max={1} step={0.01} value={project.entranceMotion.fade} display={`${Math.round(project.entranceMotion.fade * 100)}%`} onChange={(event) => mutateProject((draft) => { draft.entranceMotion.fade = Number(event.target.value); })} />
