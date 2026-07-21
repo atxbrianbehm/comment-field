@@ -1,4 +1,4 @@
-export const PROJECT_VERSION = 8;
+export const PROJECT_VERSION = 10;
 
 export interface CommentRecord {
   id: string;
@@ -156,6 +156,9 @@ export interface AmbientDriftSettings {
   driftRotation: number;
 }
 
+/** Shared: one authored bezier for every card. Rain: each card pops up from below with a deterministic random lateral path. */
+export type EntrancePathMode = "shared" | "rain";
+
 export interface EntranceMotionTemplate extends SpringMotionSettings, AmbientDriftSettings {
   duration: number;
   fade: number;
@@ -164,6 +167,12 @@ export interface EntranceMotionTemplate extends SpringMotionSettings, AmbientDri
   rotationOffset: number;
   depthOffset: number;
   path: SpatialBezierPath;
+  /** How entrance offsets are authored: one shared path, or per-card pop-up from below. */
+  pathMode: EntrancePathMode;
+  /** Field-space vertical travel for rain mode (cards start this far below their settle point). */
+  rainDistance: number;
+  /** Max |x| lateral start offset for rain mode; each card picks a deterministic value in [-spread, spread]. */
+  rainLateral: number;
   easing: CubicBezierCurve;
   opacityEasing: CubicBezierCurve;
 }
@@ -176,6 +185,8 @@ export interface MotionBlurSettings {
 
 export interface RenderSettings {
   motionBlur: MotionBlurSettings;
+  /** When true, PNG sequence export clears to transparent and omits the composition background. */
+  transparentExport: boolean;
 }
 
 export interface PreviewCacheSettings {

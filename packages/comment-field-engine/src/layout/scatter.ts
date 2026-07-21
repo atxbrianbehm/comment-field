@@ -14,7 +14,8 @@ export function generateScatter(
 ): CardPlacement[] {
   const random = createPrng(seed);
   const placements: CardPlacement[] = [];
-  const visibleCount = Math.max(1, Math.min(cardIds.length, Math.round(cardIds.length * settings.density)));
+  if (!cardIds.length) return placements;
+  const visibleCount = Math.max(1, Math.min(cardIds.length, Math.round(cardIds.length * Math.max(0, settings.density))));
   const edge = settings.edgeMargin;
   const minX = 0.5 - fieldBounds.width / 2 + edge;
   const maxX = 0.5 + fieldBounds.width / 2 - edge;

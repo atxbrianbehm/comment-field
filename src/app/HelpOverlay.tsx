@@ -9,6 +9,9 @@ const guides = [
     items: [
       ["Camera / Overview", "Camera shows the rendered shot. Overview lets you work across the oversized field without changing the shot."],
       ["Arrange", "Select a card, drag its body to move it, use corner handles to scale, and the top handle to rotate."],
+      ["Multi-select", "Shift-click cards or drag a marquee on empty space. Drag any selected card to move the group. Align/distribute in the Layout panel."],
+      ["Undo / Redo", "Ctrl+Z undoes the last project change. Ctrl+Y or Ctrl+Shift+Z redoes. Dragging cards is one undo step."],
+      ["Overview pan", "In Overview, Alt-drag (or middle-mouse) pans the field. Empty drag marquee-selects — it no longer slides the whole canvas."],
       ["Record build", "Draw through cards to author their trigger order and timing."],
       ["Layout / Build / Hero", "Layout controls final placement. Build controls arrivals and the independent opacity curve. Hero controls the featured post and reflow."],
     ],
@@ -29,6 +32,9 @@ const guides = [
     summary: "Shape motion at the shared and shot level.",
     items: [
       ["Shared entrance", "The path and transform curve are reused by every ordinary card; trigger times remain take-specific."],
+      ["Multi-screen field", "Layout → Multi-screen field. Use Vertical 1×3 for one column of screens, then Animate → Camera to pan."],
+      ["Move the camera", "Animate → Camera. Drag the field map, or use Pan X / Pan Y / Dolly, then Add keyframe at the playhead."],
+      ["Transparent PNG export", "Check Alpha next to Export PNGs to write cards over a clear plate with no background."],
       ["Opacity curve", "Open Field → Build to shape only the fade-in. Fade amount controls how transparent each card starts."],
       ["Camera", "Camera keys pan, dolly, and change FOV. Card depth creates parallax during the move."],
       ["Hero path", "Hero keys animate the featured post above every ordinary card."],

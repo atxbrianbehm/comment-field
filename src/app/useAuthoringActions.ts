@@ -30,10 +30,13 @@ interface AuthoringActionsInput {
   mutateTake: (updater: (draft: Take) => void) => void;
   pausePlayback: () => void;
   setPlayhead: (value: number) => void;
-  setProject: Dispatch<SetStateAction<Project>>;
+  setProject: (value: SetStateAction<Project>, options?: { recordHistory?: boolean }) => void;
+  /** Full replace without undo (load project). Falls back to setProject without history when omitted. */
+  replaceProject?: (project: Project) => void;
   setActiveCompositionId: Dispatch<SetStateAction<string>>;
   setActiveTakeId: Dispatch<SetStateAction<string>>;
   setSelectedCardId: Dispatch<SetStateAction<string | null>>;
+  setSelectedCardIds?: Dispatch<SetStateAction<string[]>>;
   setCommentSource: Dispatch<SetStateAction<string>>;
   setNotice: Dispatch<SetStateAction<string>>;
   setExportProgress: Dispatch<SetStateAction<{ frame: number; total: number } | null>>;
@@ -60,27 +63,42 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
   const {
     project, composition, take, takes, duration, time, commentSource, selectedPlacement, selectedComment,
     exportScale, exportProgress, sceneRef, mutateProject, mutateComposition, mutateTake, pausePlayback,
-    setPlayhead, setProject, setActiveCompositionId, setActiveTakeId, setSelectedCardId, setCommentSource, setNotice,
+    setPlayhead, setProject, replaceProject, setActiveCompositionId, setActiveTakeId, setSelectedCardId, setSelectedCardIds, setCommentSource, setNotice,
     setExportProgress, setFieldView, setMode, setRightTab, setWorkspace, setAnimateTab,
   } = input;
   function importComments() {
-    const result = commentSource.trim().startsWith("[") ? parseCommentJson(commentSource) : parsePlainText(commentSource);
-    if (!result.records.length) { setNotice("No valid comments found"); return; }
-    mutateProject((draft) => {
-      draft.comments = result.records;
-      draft.compositions = draft.compositions.map((item) => regenerateComposition(item, result.records.map((record) => record.id)));
-      for (const draftTake of draft.takes) {
-        const parent = draft.compositions.find((item) => item.id === draftTake.compositionId);
-        if (!parent) continue;
-        draftTake.gestureSamples = [];
-        draftTake.cardTriggers = resolveBuildTriggers(parent.cards, draftTake.build);
-        if (draftTake.hero && !result.records.some((record) => record.id === draftTake.hero?.cardId)) draftTake.hero = null;
-        draftTake.reflowTargets = {};
+    try {
+      const trimmed = commentSource.trim();
+      if (!trimmed) { setNotice("Paste comments first"); return; }
+      // Prefer plain text unless the payload is clearly a JSON array.
+      const result = trimmed.startsWith("[") && trimmed.endsWith("]")
+        ? parseCommentJson(commentSource)
+        : parsePlainText(commentSource);
+      if (!result.records.length) {
+        setNotice(result.errors[0] ? `Import failed: ${result.errors[0].reason}` : "No valid comments found");
+        return;
       }
-    });
-    setSelectedCardId(null);
-    setPlayhead(duration);
-    setNotice(`Loaded ${result.records.length} comments`);
+      const ids = result.records.map((record) => record.id);
+      mutateProject((draft) => {
+        draft.comments = result.records;
+        draft.compositions = draft.compositions.map((item) => regenerateComposition(item, ids));
+        for (const draftTake of draft.takes) {
+          const parent = draft.compositions.find((item) => item.id === draftTake.compositionId);
+          if (!parent) continue;
+          draftTake.gestureSamples = [];
+          draftTake.cardTriggers = resolveBuildTriggers(parent.cards, draftTake.build);
+          if (draftTake.hero && !result.records.some((record) => record.id === draftTake.hero?.cardId)) draftTake.hero = null;
+          draftTake.reflowTargets = {};
+        }
+      });
+      setSelectedCardId(null);
+      setSelectedCardIds?.([]);
+      setPlayhead(duration);
+      setNotice(`Loaded ${result.records.length} comments${result.errors.length ? ` · ${result.errors.length} lines skipped` : ""}`);
+    } catch (error) {
+      console.error(error);
+      setNotice(error instanceof Error ? `Apply failed: ${error.message}` : "Apply failed");
+    }
   }
 
   async function loadCommentFile(file: File) {
@@ -125,34 +143,49 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
   }
 
   function transformCard(cardId: string, patch: TransformPatch, editReflow: boolean) {
+    transformCards([{ cardId, patch }], editReflow);
+  }
+
+  function transformCards(moves: Array<{ cardId: string; patch: TransformPatch }>, editReflow: boolean) {
+    if (!moves.length) return;
     if (editReflow && take.hero) {
-      if (cardId === take.hero.cardId) return;
       setProject((current) => {
         const target = current.takes.find((item) => item.id === take.id);
-        const existing = target?.reflowTargets[cardId];
-        if (!target || !existing) return current;
+        if (!target) return current;
+        let reflowTargets = { ...target.reflowTargets };
+        let changed = false;
+        for (const move of moves) {
+          if (move.cardId === take.hero?.cardId) continue;
+          const existing = reflowTargets[move.cardId];
+          if (!existing) continue;
+          reflowTargets = { ...reflowTargets, [move.cardId]: { ...existing, ...move.patch } };
+          changed = true;
+        }
+        if (!changed) return current;
         return {
           ...current,
           updatedAt: new Date().toISOString(),
-          takes: current.takes.map((item) => item.id === target.id ? {
-            ...item,
-            reflowTargets: { ...item.reflowTargets, [cardId]: { ...existing, ...patch } },
-          } : item),
+          takes: current.takes.map((item) => item.id === target.id ? { ...item, reflowTargets } : item),
         };
       });
       return;
     }
     setProject((current) => {
       const target = current.compositions.find((item) => item.id === composition.id);
-      const card = target?.cards.find((item) => item.cardId === cardId);
-      if (!target || !card || card.locked) return current;
+      if (!target) return current;
+      const patchById = new Map(moves.map((move) => [move.cardId, move.patch]));
+      let changed = false;
+      const cards = target.cards.map((card) => {
+        const patch = patchById.get(card.cardId);
+        if (!patch || card.locked) return card;
+        changed = true;
+        return { ...card, ...patch };
+      });
+      if (!changed) return current;
       return {
         ...current,
         updatedAt: new Date().toISOString(),
-        compositions: current.compositions.map((item) => item.id === target.id ? {
-          ...item,
-          cards: item.cards.map((itemCard) => itemCard.cardId === cardId ? { ...itemCard, ...patch } : itemCard),
-        } : item),
+        compositions: current.compositions.map((item) => item.id === target.id ? { ...item, cards } : item),
       };
     });
   }
@@ -164,6 +197,7 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
     if (firstTake) setActiveTakeId(firstTake.id);
     setSelectedCardId(null);
     setPlayhead(firstTake?.duration ?? 8);
+    // Multi-select is owned by App; clearing primary is enough for single-card consumers.
   }
 
   function addProtectedRegion() {
@@ -279,7 +313,8 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
   async function loadJson(file: File) {
     try {
       const loaded = deserializeProject(await file.text());
-      setProject(loaded);
+      if (replaceProject) replaceProject(loaded);
+      else setProject(loaded, { recordHistory: false });
       setActiveCompositionId(loaded.compositions[0].id);
       setActiveTakeId(loaded.takes.find((item) => item.compositionId === loaded.compositions[0].id)?.id ?? loaded.takes[0].id);
       setSelectedCardId(null);
@@ -299,22 +334,27 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
     if (!sceneRef.current || exportProgress) { setNotice("Return to Field or Hero view before exporting"); return; }
     const width = Math.round(composition.width * exportScale);
     const height = Math.round(composition.height * exportScale);
+    const transparent = Boolean(project.renderSettings.transparentExport);
     try {
       pausePlayback();
       setExportProgress({ frame: 0, total: Math.round(duration * composition.frameRate) });
       sceneRef.current.beginExport(width, height);
       const { exportPngSequence } = await import("../export/pngSequence");
-      const blob = await exportPngSequence(sceneRef.current.renderFrame, {
-        width,
-        height,
-        frameRate: composition.frameRate,
-        duration,
-        prefix: `${composition.name.replace(/\W+/g, "-").toLowerCase()}-${take.name.replace(/\W+/g, "-").toLowerCase()}`,
-      }, (progress) => {
-        if (progress.frame === progress.total || progress.frame % 5 === 0) setExportProgress(progress);
-      });
-      downloadBlob(blob, `${project.id}-${composition.id}-${take.id}-png.zip`);
-      setNotice("PNG sequence exported");
+      const blob = await exportPngSequence(
+        (time, frameWidth, frameHeight) => sceneRef.current!.renderFrame(time, frameWidth, frameHeight, { transparent }),
+        {
+          width,
+          height,
+          frameRate: composition.frameRate,
+          duration,
+          prefix: `${composition.name.replace(/\W+/g, "-").toLowerCase()}-${take.name.replace(/\W+/g, "-").toLowerCase()}${transparent ? "-alpha" : ""}`,
+        },
+        (progress) => {
+          if (progress.frame === progress.total || progress.frame % 5 === 0) setExportProgress(progress);
+        },
+      );
+      downloadBlob(blob, `${project.id}-${composition.id}-${take.id}${transparent ? "-alpha" : ""}-png.zip`);
+      setNotice(transparent ? "Transparent PNG sequence exported" : "PNG sequence exported");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Export failed"); }
     finally { sceneRef.current?.endExport(); setExportProgress(null); }
   }
@@ -340,7 +380,7 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
     finally { sceneRef.current?.endExport(); }
   }
   return {
-    importComments, loadCommentFile, scatter, updateBuild, randomizeBuild, completeGesture, transformCard,
+    importComments, loadCommentFile, scatter, updateBuild, randomizeBuild, completeGesture, transformCard, transformCards,
     switchComposition, addProtectedRegion, setHero, removeHero, bakeReflow, createTake, fitFieldToComments,
     alignCameraToHero, deleteTake, saveJson, loadJson, loadBackground, exportFrames, verifyDeterministicFrame,
   };

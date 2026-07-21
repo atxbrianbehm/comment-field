@@ -42,6 +42,9 @@ export const DEFAULT_ENTRANCE_MOTION: EntranceMotionTemplate = {
     control1: { x: -0.01, y: 0.065 },
     control2: { x: 0, y: 0.025 },
   },
+  pathMode: "shared",
+  rainDistance: 0.55,
+  rainLateral: 0.22,
   easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
   opacityEasing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
 };
@@ -52,6 +55,7 @@ export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
     shutterAngle: 180,
     strength: 1,
   },
+  transparentExport: false,
 };
 
 export const DEFAULT_SCATTER: ScatterSettings = {
@@ -91,7 +95,7 @@ function createComposition(id: string, name: string, width: number, height: numb
     scatter: { ...DEFAULT_SCATTER },
     cards: [],
     camera: { fov: 42, x: 0, y: 0, z: 5 },
-    fieldBounds: { width: 3, height: 3 },
+    fieldBounds: { width: 1, height: 1 },
     protectedRegions: [],
   };
   composition.cards = generateScatter(DEFAULT_COMMENTS.map((comment) => comment.id), seed, composition.scatter, composition.protectedRegions, composition.fieldBounds);

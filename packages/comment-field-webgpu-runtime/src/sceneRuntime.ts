@@ -20,7 +20,7 @@ import { createCardTextureFromSource } from "./cardTexture";
 import { WebGPURenderer } from "./webgpuRenderer.js";
 import { CardRasterService } from "./cardRasterService";
 import { createPerformanceTelemetry, type PerformanceTelemetryRecorder, type PerformanceTelemetrySnapshot } from "./performanceTelemetry";
-import { flipWebGpuReadback } from "./previewCache";
+import { packReadbackPixels } from "./previewCache";
 
 export interface RuntimeCacheStatus {
   state: "ready" | "rebuilding";
@@ -39,6 +39,8 @@ export interface SceneRenderInput {
   cardStyle: CardStyle;
   time: number;
   selectedCardId: string | null;
+  /** Multi-select set; when empty, falls back to selectedCardId. */
+  selectedCardIds?: string[];
   mode: "select" | "record" | "reflow";
   viewMode: "camera" | "overview";
   showTransformHandles: boolean;
@@ -50,6 +52,8 @@ export interface RuntimeSelectionOverlay {
   center: { x: number; y: number };
   rotationHandle: { x: number; y: number };
   locked: boolean;
+  /** Additional selected card outlines (screen-space quads) for multi-select. */
+  extras?: Array<{ points: Array<{ x: number; y: number }> }>;
 }
 
 export interface RuntimeFieldOverlay {
@@ -81,7 +85,8 @@ export interface SceneController {
 export async function createSceneController(options: { canvasPixelRatio?: number; cardTexturePixelRatio?: number } = {}) {
   const canvasPixelRatio = options.canvasPixelRatio ?? 1;
   const cardTexturePixelRatio = options.cardTexturePixelRatio ?? 2;
-  const renderer = new WebGPURenderer({ antialias: true, alpha: false });
+  // alpha: true so PNG export can clear to transparent without a plate behind the cards.
+  const renderer = new WebGPURenderer({ antialias: true, alpha: true });
   await renderer.init();
   if (!renderer.backend.isWebGPUBackend) throw new Error("WebGPU backend acquisition failed");
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -127,19 +132,30 @@ export async function renderPngBlob(
   overviewCamera: CameraPose,
   width: number,
   height: number,
+  options: { transparent?: boolean } = {},
 ) {
   const temporaryExport = !controller.exporting;
   if (temporaryExport) {
     controller.renderer.setPixelRatio(1);
     controller.renderer.setSize(width, height, false);
   }
-  renderScene(controller, input, overviewCamera, { clean: true, production: true });
-  const blob = await new Promise<Blob>((resolve, reject) => controller.renderer.domElement.toBlob(
-    (value) => value ? resolve(value) : reject(new Error("Frame capture failed")),
-    "image/png",
-  ));
-  if (temporaryExport) resizeScene(controller, controller.frameWidth, controller.frameHeight);
-  return blob;
+  const previousBackground = controller.scene.background;
+  if (options.transparent) controller.scene.background = null;
+  try {
+    renderScene(controller, input, overviewCamera, {
+      clean: true,
+      production: true,
+      transparentBackground: Boolean(options.transparent),
+    });
+    const blob = await new Promise<Blob>((resolve, reject) => controller.renderer.domElement.toBlob(
+      (value) => value ? resolve(value) : reject(new Error("Frame capture failed")),
+      "image/png",
+    ));
+    return blob;
+  } finally {
+    if (options.transparent) controller.scene.background = previousBackground;
+    if (temporaryExport) resizeScene(controller, controller.frameWidth, controller.frameHeight);
+  }
 }
 
 export function endSceneExport(controller: SceneController) {
@@ -157,28 +173,59 @@ function screenPoint(point: THREE.Vector3, controller: SceneController) {
   return { x: (projected.x * 0.5 + 0.5) * controller.frameWidth, y: (-projected.y * 0.5 + 0.5) * controller.frameHeight };
 }
 
-function configureCamera(controller: SceneController, composition: Composition, pose: CameraPose) {
+function configureCamera(
+  controller: SceneController,
+  composition: Composition,
+  pose: CameraPose,
+  options: { transparentBackground?: boolean } = {},
+) {
   controller.camera.aspect = composition.width / composition.height;
   controller.camera.fov = pose.fov;
   controller.camera.position.set(pose.x, pose.y, pose.z);
   controller.camera.updateProjectionMatrix();
-  controller.renderer.setClearColor(composition.backgroundColor, 1);
+  if (options.transparentBackground) controller.renderer.setClearColor(0x000000, 0);
+  else controller.renderer.setClearColor(composition.backgroundColor, 1);
+}
+
+function selectedIdsFromInput(input: SceneRenderInput) {
+  if (input.selectedCardIds?.length) return input.selectedCardIds;
+  return input.selectedCardId ? [input.selectedCardId] : [];
+}
+
+function meshScreenQuad(controller: SceneController, mesh: THREE.Mesh<THREE.PlaneGeometry, CardMaterial>) {
+  const width = mesh.geometry.parameters.width / 2;
+  const height = mesh.geometry.parameters.height / 2;
+  mesh.updateMatrixWorld(true);
+  const points = [new THREE.Vector3(-width, -height, 0), new THREE.Vector3(width, -height, 0), new THREE.Vector3(width, height, 0), new THREE.Vector3(-width, height, 0)]
+    .map((point) => screenPoint(point.applyMatrix4(mesh.matrixWorld), controller));
+  const center = screenPoint(new THREE.Vector3(0, 0, 0).applyMatrix4(mesh.matrixWorld), controller);
+  const topCenter = screenPoint(new THREE.Vector3(0, height, 0).applyMatrix4(mesh.matrixWorld), controller);
+  return { points, center, topCenter };
 }
 
 function selectionOverlay(controller: SceneController, input: SceneRenderInput): RuntimeSelectionOverlay | null {
-  const selected = input.selectedCardId ? controller.meshes.get(input.selectedCardId) : null;
-  const placement = input.composition.cards.find((card) => card.cardId === input.selectedCardId);
-  if (!selected || !placement || !input.showTransformHandles || input.mode !== "select") return null;
-  const width = selected.geometry.parameters.width / 2;
-  const height = selected.geometry.parameters.height / 2;
-  selected.updateMatrixWorld(true);
-  const points = [new THREE.Vector3(-width, -height, 0), new THREE.Vector3(width, -height, 0), new THREE.Vector3(width, height, 0), new THREE.Vector3(-width, height, 0)]
-    .map((point) => screenPoint(point.applyMatrix4(selected.matrixWorld), controller));
-  const center = screenPoint(new THREE.Vector3(0, 0, 0).applyMatrix4(selected.matrixWorld), controller);
-  const topCenter = screenPoint(new THREE.Vector3(0, height, 0).applyMatrix4(selected.matrixWorld), controller);
-  const vector = { x: topCenter.x - center.x, y: topCenter.y - center.y };
+  if (!input.showTransformHandles || input.mode !== "select") return null;
+  const ids = selectedIdsFromInput(input);
+  if (!ids.length) return null;
+  const primaryId = input.selectedCardId && ids.includes(input.selectedCardId) ? input.selectedCardId : ids[ids.length - 1];
+  const selected = controller.meshes.get(primaryId);
+  const placement = input.composition.cards.find((card) => card.cardId === primaryId);
+  if (!selected || !placement) return null;
+  const primary = meshScreenQuad(controller, selected);
+  const vector = { x: primary.topCenter.x - primary.center.x, y: primary.topCenter.y - primary.center.y };
   const magnitude = Math.max(1, Math.hypot(vector.x, vector.y));
-  return { points, center, rotationHandle: { x: topCenter.x + (vector.x / magnitude) * 36, y: topCenter.y + (vector.y / magnitude) * 36 }, locked: placement.locked };
+  const extras = ids
+    .filter((id) => id !== primaryId)
+    .map((id) => controller.meshes.get(id))
+    .filter((mesh): mesh is THREE.Mesh<THREE.PlaneGeometry, CardMaterial> => Boolean(mesh))
+    .map((mesh) => ({ points: meshScreenQuad(controller, mesh).points }));
+  return {
+    points: primary.points,
+    center: primary.center,
+    rotationHandle: { x: primary.topCenter.x + (vector.x / magnitude) * 36, y: primary.topCenter.y + (vector.y / magnitude) * 36 },
+    locked: placement.locked,
+    extras,
+  };
 }
 
 function fieldOverlay(controller: SceneController, input: SceneRenderInput, outputCamera: CameraPose): RuntimeFieldOverlay {
@@ -205,7 +252,7 @@ function fieldOverlay(controller: SceneController, input: SceneRenderInput, outp
   return { field, camera, protectedRegions };
 }
 
-export function renderScene(controller: SceneController, input: SceneRenderInput, overviewCamera: CameraPose, options: { target?: THREE.RenderTarget | null; clean?: boolean; production?: boolean } = {}) {
+export function renderScene(controller: SceneController, input: SceneRenderInput, overviewCamera: CameraPose, options: { target?: THREE.RenderTarget | null; clean?: boolean; production?: boolean; transparentBackground?: boolean } = {}) {
   const startedAt = performance.now();
   const dimensions = compositionWorldDimensions(input.composition);
   const entrance = input.take.entranceOverride ?? input.entranceMotion;
@@ -216,20 +263,26 @@ export function renderScene(controller: SceneController, input: SceneRenderInput
     ? evaluateScene(input.composition, input.take, entrance, Math.max(0, input.time - shutterSeconds))
     : null;
   const previousCards = new Map(previousState?.cards.map((card) => [card.cardId, card]) ?? []);
-  const renderCamera = input.viewMode === "overview" && !options.production && !options.target ? overviewCamera : state.camera;
-  configureCamera(controller, input.composition, renderCamera);
+  // Overview layout: show every card at its settled composition pose so hit-tests match what you arrange.
+  const layoutEdit = input.viewMode === "overview" && !options.production && !options.target;
+  const renderCamera = layoutEdit ? overviewCamera : state.camera;
+  configureCamera(controller, input.composition, renderCamera, { transparentBackground: options.transparentBackground });
+  controller.camera.updateMatrixWorld(true);
+  const selectedSet = !options.clean ? new Set(selectedIdsFromInput(input)) : null;
+  const placementById = new Map(input.composition.cards.map((card) => [card.cardId, card]));
   for (const card of state.cards) {
     const mesh = controller.meshes.get(card.cardId);
     if (!mesh) continue;
-    mesh.position.set((card.x - 0.5) * dimensions.width, (0.5 - card.y) * dimensions.height, card.z);
-    mesh.rotation.z = -card.rotation;
-    mesh.scale.setScalar(card.scale);
-    mesh.visible = card.opacity > 0.005;
+    const placement = layoutEdit ? (placementById.get(card.cardId) ?? card) : card;
+    mesh.position.set((placement.x - 0.5) * dimensions.width, (0.5 - placement.y) * dimensions.height, placement.z);
+    mesh.rotation.z = -placement.rotation;
+    mesh.scale.setScalar(placement.scale);
+    mesh.visible = layoutEdit ? true : card.opacity > 0.005;
     const previous = previousCards.get(card.cardId);
     let motionX = 0;
     let motionY = 0;
     let motionAmount = 0;
-    if (previous && input.viewMode !== "overview") {
+    if (previous && !layoutEdit) {
       const currentWorld = fieldPointToWorld(input.composition, card);
       const previousWorld = fieldPointToWorld(input.composition, previous);
       const currentScreen = projectWorldPoint(input.composition, state.camera, { ...currentWorld, z: card.z });
@@ -239,19 +292,22 @@ export function renderScene(controller: SceneController, input: SceneRenderInput
       motionY = THREE.MathUtils.clamp((currentScreen.y - previousScreen.y) * strength * 3, -0.12, 0.12);
       motionAmount = Math.min(1, Math.hypot(currentScreen.x - previousScreen.x, currentScreen.y - previousScreen.y) * strength * 20);
     }
-    const effects = card.blur > 0.01 || motionAmount > 0.0001;
+    const effects = !layoutEdit && (card.blur > 0.01 || motionAmount > 0.0001);
     if (mesh.material.cardEffectMode !== effects) {
       const texture = controller.cache.get(card.cardId)?.texture;
       if (texture) { mesh.material.dispose(); mesh.material = createCardMaterial(texture, effects); }
     }
-    mesh.material.cardUniforms.opacity.value = card.opacity;
-    mesh.material.cardUniforms.blur.value = card.blur;
-    mesh.material.cardUniforms.selected.value = !options.clean && input.selectedCardId === card.cardId ? 1 : 0;
+    mesh.material.cardUniforms.opacity.value = layoutEdit ? 1 : card.opacity;
+    mesh.material.cardUniforms.blur.value = layoutEdit ? 0 : card.blur;
+    const isSelected = Boolean(selectedSet?.has(card.cardId));
+    mesh.material.cardUniforms.selected.value = isSelected ? 1 : 0;
     mesh.material.cardUniforms.hero.value = input.take.hero?.cardId === card.cardId ? 1 : 0;
     mesh.material.cardUniforms.motionX.value = motionX;
     mesh.material.cardUniforms.motionY.value = motionY;
     mesh.material.cardUniforms.motionAmount.value = motionAmount;
-    mesh.renderOrder = card.layerPriority;
+    // Keep selected cards painted (and hit-tested) above overlaps.
+    const selectedBoost = isSelected ? (card.cardId === input.selectedCardId ? 500_000 : 400_000) : 0;
+    mesh.renderOrder = card.layerPriority + selectedBoost;
   }
   controller.renderer.setRenderTarget(options.target ?? null);
   controller.renderer.render(controller.scene, controller.camera);
@@ -266,15 +322,216 @@ export function normalizedCanvasPoint(controller: SceneController, clientX: numb
   return { x: clamp((clientX - rect.left) / rect.width), y: clamp((clientY - rect.top) / rect.height) };
 }
 
-export function hitTestCard(controller: SceneController, clientX: number, clientY: number) {
-  const point = normalizedCanvasPoint(controller, clientX, clientY);
-  const raycaster = new THREE.Raycaster();
-  raycaster.setFromCamera(new THREE.Vector2(point.x * 2 - 1, -(point.y * 2 - 1)), controller.camera);
-  return raycaster.intersectObjects([...controller.meshes.values()], false)[0]?.object.userData.cardId as string | undefined;
+/**
+ * Pick the card under the pointer.
+ * Transparent cards use renderOrder for stacking (depthWrite is off), so a pure depth
+ * raycast often returns a different post than the one painted on top. Prefer the
+ * currently selected card when it is under the cursor, then break near-depth ties by
+ * renderOrder so hits match what the user sees.
+ */
+function pointInConvexQuad(
+  px: number,
+  py: number,
+  quad: Array<{ x: number; y: number }>,
+) {
+  // Barycentric-style edge tests for a convex quad in screen space.
+  let sign = 0;
+  for (let i = 0; i < 4; i += 1) {
+    const a = quad[i];
+    const b = quad[(i + 1) % 4];
+    const cross = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x);
+    if (Math.abs(cross) < 1e-8) continue;
+    const next = cross > 0 ? 1 : -1;
+    if (sign === 0) sign = next;
+    else if (sign !== next) return false;
+  }
+  return true;
+}
+
+function preferredIdSet(preferredCardIds?: string | string[] | null) {
+  if (Array.isArray(preferredCardIds)) return new Set(preferredCardIds);
+  if (preferredCardIds) return new Set([preferredCardIds]);
+  return new Set<string>();
+}
+
+function clientToFramePoint(controller: SceneController, clientX: number, clientY: number) {
+  const rect = controller.renderer.domElement.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return null;
+  // Allow a few px of slack outside the canvas edge so card borders stay grabbable.
+  const pad = 8;
+  if (
+    clientX < rect.left - pad || clientX > rect.right + pad
+    || clientY < rect.top - pad || clientY > rect.bottom + pad
+  ) return null;
+  return {
+    px: ((clientX - rect.left) / rect.width) * controller.frameWidth,
+    py: ((clientY - rect.top) / rect.height) * controller.frameHeight,
+    rect,
+  };
+}
+
+function quadHitsPoint(
+  px: number,
+  py: number,
+  points: Array<{ x: number; y: number }>,
+  center: { x: number; y: number },
+  padScale = 1.2,
+  padPx = 14,
+) {
+  // Inflate from center (relative) and with a fixed pixel pad (AABB) so small/thin cards stay grabbable.
+  const padded = points.map((point) => ({
+    x: center.x + (point.x - center.x) * padScale,
+    y: center.y + (point.y - center.y) * padScale,
+  }));
+  if (pointInConvexQuad(px, py, padded)) return true;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of padded) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+  return px >= minX - padPx && px <= maxX + padPx && py >= minY - padPx && py <= maxY + padPx;
+}
+
+/**
+ * Screen-space pick: project each card's quad into the canvas and test the pointer.
+ * More reliable than raycasting WebGPU node materials for overview/layout interaction.
+ */
+export function pickCardAtClient(
+  controller: SceneController,
+  clientX: number,
+  clientY: number,
+  preferredCardIds?: string | string[] | null,
+) {
+  const frame = clientToFramePoint(controller, clientX, clientY);
+  if (!frame) return undefined;
+  const { px, py } = frame;
+  controller.camera.updateMatrixWorld(true);
+
+  const preferred = preferredIdSet(preferredCardIds);
+
+  type Hit = { id: string; renderOrder: number; z: number; preferred: boolean };
+  const hits: Hit[] = [];
+  for (const [cardId, mesh] of controller.meshes) {
+    const quad = meshScreenQuad(controller, mesh);
+    if (!quadHitsPoint(px, py, quad.points, quad.center, preferred.has(cardId) ? 1.35 : 1.18, preferred.has(cardId) ? 22 : 12)) {
+      continue;
+    }
+    hits.push({
+      id: cardId,
+      renderOrder: mesh.renderOrder,
+      z: mesh.position.z,
+      preferred: preferred.has(cardId),
+    });
+  }
+  // No soft center fallback here — blank space must remain clickable for deselect/marquee.
+  if (!hits.length) return undefined;
+  hits.sort((a, b) => {
+    if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+    if (a.renderOrder !== b.renderOrder) return b.renderOrder - a.renderOrder;
+    return b.z - a.z;
+  });
+  return hits[0]?.id;
+}
+
+/** Screen-space quads for the given card ids (same space as selection overlay). */
+export function cardScreenQuads(
+  controller: SceneController,
+  cardIds: string[],
+) {
+  controller.camera.updateMatrixWorld(true);
+  const quads: Array<{ id: string; points: Array<{ x: number; y: number }>; center: { x: number; y: number } }> = [];
+  for (const id of cardIds) {
+    const mesh = controller.meshes.get(id);
+    if (!mesh) continue;
+    const quad = meshScreenQuad(controller, mesh);
+    quads.push({ id, points: quad.points, center: quad.center });
+  }
+  return quads;
+}
+
+/**
+ * Restrict pick to the given card ids (multi-select group drag).
+ * Hits only padded card bodies — no soft center radius — so blank field
+ * clicks can still marquee / deselect.
+ */
+export function pickPreferredCardAtClient(
+  controller: SceneController,
+  clientX: number,
+  clientY: number,
+  preferredCardIds: string | string[],
+) {
+  const preferred = preferredIdSet(preferredCardIds);
+  if (!preferred.size) return undefined;
+  const frame = clientToFramePoint(controller, clientX, clientY);
+  if (!frame) return undefined;
+  const { px, py } = frame;
+  controller.camera.updateMatrixWorld(true);
+
+  let bestId: string | undefined;
+  let bestDist = Infinity;
+  for (const id of preferred) {
+    const mesh = controller.meshes.get(id);
+    if (!mesh) continue;
+    const quad = meshScreenQuad(controller, mesh);
+    // Modest pad: easy to grab selected cards, but blank gaps stay empty.
+    if (!quadHitsPoint(px, py, quad.points, quad.center, 1.2, 10)) continue;
+    const dist = Math.hypot(quad.center.x - px, quad.center.y - py);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestId = id;
+    }
+  }
+  return bestId;
+}
+
+export function hitTestCard(
+  controller: SceneController,
+  clientX: number,
+  clientY: number,
+  preferredCardIds?: string | string[] | null,
+  options?: { softPick?: boolean; preferredOnly?: boolean },
+) {
+  if (options?.preferredOnly) {
+    const preferred = preferredIdSet(preferredCardIds);
+    if (preferred.size) {
+      return pickPreferredCardAtClient(controller, clientX, clientY, [...preferred]);
+    }
+  }
+
+  // Primary path: screen-space quad pick (works with overview layout + node materials).
+  const screenHit = pickCardAtClient(controller, clientX, clientY, preferredCardIds);
+  if (screenHit) return screenHit;
+
+  if (!options?.softPick) return undefined;
+
+  const frame = clientToFramePoint(controller, clientX, clientY);
+  if (!frame) return undefined;
+  controller.camera.updateMatrixWorld(true);
+  const preferred = preferredIdSet(preferredCardIds);
+
+  let bestId: string | undefined;
+  let bestDist = Math.max(controller.frameWidth, controller.frameHeight) * 0.05;
+  for (const [cardId, mesh] of controller.meshes) {
+    const center = meshScreenQuad(controller, mesh).center;
+    const dist = Math.hypot(center.x - frame.px, center.y - frame.py);
+    // Prefer currently-selected cards on soft-pick ties.
+    const score = preferred.has(cardId) ? dist * 0.65 : dist;
+    if (score < bestDist) {
+      bestDist = score;
+      bestId = cardId;
+    }
+  }
+  return bestId;
 }
 
 export function fieldPointAt(controller: SceneController, composition: Composition, clientX: number, clientY: number, z = 0) {
   const point = normalizedCanvasPoint(controller, clientX, clientY);
+  controller.camera.updateMatrixWorld(true);
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(new THREE.Vector2(point.x * 2 - 1, -(point.y * 2 - 1)), controller.camera);
   const world = new THREE.Vector3();
@@ -356,10 +613,12 @@ export async function renderPreviewBlob(controller: SceneController, input: Scen
   const readbackStartedAt = performance.now();
   const pixels = await controller.renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height) as Uint8Array;
   controller.telemetry.record("gpuReadback", performance.now() - readbackStartedAt);
-  const flipped = flipWebGpuReadback(pixels, width, height);
+  // WebGPU texture copies are top-down like canvas; WebGL readPixels are bottom-up and need a flip.
+  const flipY = !controller.renderer.backend?.isWebGPUBackend;
+  const packed = packReadbackPixels(pixels, width, height, flipY);
   const canvas = controller.encodeCanvas ?? document.createElement("canvas"); controller.encodeCanvas = canvas; canvas.width = width; canvas.height = height;
   const context = canvas.getContext("2d", { alpha: false }); if (!context) throw new Error("Preview encoder is unavailable");
-  context.putImageData(new ImageData(flipped, width, height), 0, 0);
+  context.putImageData(new ImageData(packed, width, height), 0, 0);
   const encodeStartedAt = performance.now();
   return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => {
     controller.telemetry.record("frameEncode", performance.now() - encodeStartedAt);

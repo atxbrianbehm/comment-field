@@ -44,6 +44,9 @@ export function segmentProgress<K extends TimedKeyframe<unknown>>(from: K, to: K
   if (time <= departure || to.time <= departure) return 0;
   if (to.interpolation === "cut" || to.cut) return 0;
   const linear = clamp((time - departure) / Math.max(0.000001, to.time - departure));
-  const isLinear = to.interpolation === "linear" || (!to.interpolation && to.easing.x1 === 0 && to.easing.y1 === 0 && to.easing.x2 === 1 && to.easing.y2 === 1);
-  return isLinear ? linear : evaluateBezierCurve(to.easing, linear);
+  // Explicit linear mode skips the curve. Bezier / smooth / legacy always evaluate easing
+  // so the timing graph always changes mid-segment speed.
+  if (to.interpolation === "linear") return linear;
+  const easing = to.easing ?? { x1: 0, y1: 0, x2: 1, y2: 1 };
+  return evaluateBezierCurve(easing, linear);
 }

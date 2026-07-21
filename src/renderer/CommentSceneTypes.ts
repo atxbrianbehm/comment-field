@@ -5,9 +5,15 @@ export type InteractionMode = "select" | "record" | "reflow";
 export type TransformPatch = Partial<Pick<Transform, "x" | "y" | "scale" | "rotation">>;
 export type CacheStatus = RuntimeCacheStatus;
 
+export interface SelectOptions {
+  additive?: boolean;
+  /** Replace selection with this set (marquee). */
+  ids?: string[] | null;
+}
+
 export interface CommentSceneHandle {
   beginExport: (width: number, height: number) => void;
-  renderFrame: (time: number, width: number, height: number) => Promise<Blob>;
+  renderFrame: (time: number, width: number, height: number, options?: { transparent?: boolean }) => Promise<Blob>;
   renderLiveFrame: (time: number) => void;
   renderPreviewFrame: (time: number, width: number, height: number, quality: number) => Promise<Blob>;
   showPreviewBitmap: (bitmap: ImageBitmap) => void;
@@ -26,16 +32,19 @@ export interface CommentSceneProps {
   renderSettings: RenderSettings;
   time: number;
   selectedCardId: string | null;
+  selectedCardIds?: string[];
   selectedGestureIndex?: number | null;
   mode: InteractionMode;
   showTransformHandles?: boolean;
   showGesturePath?: boolean;
-  onSelect: (cardId: string | null) => void;
+  onSelect: (cardId: string | null, options?: SelectOptions) => void;
   onSelectGestureSample?: (index: number | null) => void;
   onGestureSampleChange?: (index: number, patch: Partial<GestureSample>) => void;
   onTransformCard: (cardId: string, patch: TransformPatch, editReflow: boolean) => void;
+  onTransformCards?: (moves: Array<{ cardId: string; patch: TransformPatch }>, editReflow: boolean) => void;
   onGestureComplete: (samples: GestureSample[]) => void;
   onCacheStatus?: (status: CacheStatus) => void;
   onManipulationStart?: () => void;
+  onManipulationEnd?: () => void;
   viewMode?: "camera" | "overview";
 }

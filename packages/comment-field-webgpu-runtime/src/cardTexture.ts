@@ -2,9 +2,10 @@ import * as THREE from "three";
 import type { CardStyle, CommentRecord } from "@comment-field/engine";
 
 function hexWithOpacity(hex: string, opacity: number) {
-  const normalized = hex.replace("#", "");
-  const value = normalized.length === 3 ? normalized.split("").map((character) => character + character).join("") : normalized;
-  const number = Number.parseInt(value, 16);
+  const raw = (hex || "#FFFFFF").replace("#", "").trim();
+  const normalized = raw.length === 3 ? raw.split("").map((character) => character + character).join("") : raw.padEnd(6, "0").slice(0, 6);
+  const number = Number.parseInt(normalized, 16);
+  if (!Number.isFinite(number)) return `rgba(255, 255, 255, ${opacity})`;
   return `rgba(${(number >> 16) & 255}, ${(number >> 8) & 255}, ${number & 255}, ${opacity})`;
 }
 
@@ -23,7 +24,8 @@ function roundedRect(context: CardContext, x: number, y: number, width: number, 
 }
 
 function wrapLines(context: CardContext, text: string, maxWidth: number) {
-  const words = text.split(/\s+/);
+  const words = String(text || " ").split(/\s+/).filter(Boolean);
+  if (!words.length) return [" "];
   const lines: string[] = [];
   let line = "";
   for (const word of words) {
@@ -34,7 +36,7 @@ function wrapLines(context: CardContext, text: string, maxWidth: number) {
     } else line = candidate;
   }
   if (line) lines.push(line);
-  return lines;
+  return lines.length ? lines : [" "];
 }
 
 export interface CardTextureResult {
@@ -57,12 +59,13 @@ export function renderCardSurface(comment: CommentRecord, style: CardStyle, canv
   const contentWidth = width - style.padding * 2;
   const context = canvas.getContext("2d") as CardContext;
   context.font = `${style.bodySize}px Inter, ui-sans-serif, system-ui, sans-serif`;
-  const lines = wrapLines(context, comment.message, contentWidth);
+  const lines = wrapLines(context, comment.message || " ", contentWidth).slice(0, 40);
   const headerVisible = style.showAvatar || style.showDisplayName || style.showHandle || style.showTimestamp;
   const headerHeight = headerVisible ? Math.max(style.showAvatar ? style.avatarSize : 0, 46) + 12 : 0;
   const engagementHeight = style.showEngagement ? 42 : 8;
   const bodyHeight = Math.max(style.bodySize * 1.35, lines.length * style.bodySize * 1.35);
-  const height = style.padding * 2 + headerHeight + bodyHeight + engagementHeight;
+  // Cap height so huge comments cannot exceed browser/WebGPU texture limits.
+  const height = Math.min(2048, style.padding * 2 + headerHeight + bodyHeight + engagementHeight);
   canvas.width = (width + shadowMargin * 2) * pixelRatio;
   canvas.height = (height + shadowMargin * 2) * pixelRatio;
   context.scale(pixelRatio, pixelRatio);

@@ -89,14 +89,42 @@ export function BezierOverlay({
 export function CurveEditor({ curve, onChange }: { curve: CubicBezierCurve; onChange: (curve: CubicBezierCurve) => void }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<"one" | "two" | null>(null);
+  const curveRef = useRef(curve);
+  curveRef.current = curve;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
-  function move(event: React.PointerEvent<HTMLDivElement>) {
+  function applyClient(clientX: number, clientY: number) {
     if (!activeRef.current || !stageRef.current) return;
-    const point = toStagePoint(stageRef.current, event.clientX, event.clientY);
-    const value = { x: point.x, y: 1 - point.y };
-    onChange(activeRef.current === "one"
-      ? { ...curve, x1: value.x, y1: value.y }
-      : { ...curve, x2: value.x, y2: value.y });
+    const point = toStagePoint(stageRef.current, clientX, clientY);
+    // Allow slight vertical overshoot so ease handles can push past 0–1.
+    const rect = stageRef.current.getBoundingClientRect();
+    const rawY = 1 - Math.min(1.35, Math.max(-0.35, (clientY - rect.top) / Math.max(1, rect.height)));
+    const value = { x: point.x, y: rawY };
+    const current = curveRef.current;
+    onChangeRef.current(activeRef.current === "one"
+      ? { ...current, x1: value.x, y1: value.y }
+      : { ...current, x2: value.x, y2: value.y });
+  }
+
+  function begin(handle: "one" | "two", event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    activeRef.current = handle;
+    applyClient(event.clientX, event.clientY);
+
+    const target = event.currentTarget;
+    const onMove = (moveEvent: PointerEvent) => applyClient(moveEvent.clientX, moveEvent.clientY);
+    const onUp = () => {
+      activeRef.current = null;
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+      target.removeEventListener("pointercancel", onUp);
+    };
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+    target.addEventListener("pointercancel", onUp);
   }
 
   const p1 = { x: curve.x1, y: 1 - curve.y1 };
@@ -104,13 +132,7 @@ export function CurveEditor({ curve, onChange }: { curve: CubicBezierCurve; onCh
   const path = `M 0 100 C ${p1.x * 100} ${p1.y * 100}, ${p2.x * 100} ${p2.y * 100}, 100 0`;
   return (
     <div className="curve-editor">
-      <div
-        ref={stageRef}
-        className="curve-editor-stage"
-        onPointerMove={move}
-        onPointerUp={() => { activeRef.current = null; }}
-        onPointerCancel={() => { activeRef.current = null; }}
-      >
+      <div ref={stageRef} className="curve-editor-stage">
         <svg viewBox="0 0 100 100" preserveAspectRatio="none">
           <path className="curve-grid" d="M0 100 L100 0 M0 50 H100 M50 0 V100" />
           <line className="curve-tangent" x1="0" y1="100" x2={p1.x * 100} y2={p1.y * 100} />
@@ -124,10 +146,7 @@ export function CurveEditor({ curve, onChange }: { curve: CubicBezierCurve; onCh
             aria-label={`Timing control ${name}`}
             className="curve-point"
             style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
-            onPointerDown={(event) => {
-              event.currentTarget.setPointerCapture(event.pointerId);
-              activeRef.current = name;
-            }}
+            onPointerDown={(event) => begin(name, event)}
           >
             <span className="curve-dot" />
           </button>

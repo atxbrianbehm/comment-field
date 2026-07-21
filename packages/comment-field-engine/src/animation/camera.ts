@@ -4,7 +4,33 @@ import { evaluateBezierCurve } from "./bezier";
 import { segmentProgress, sortKeyframes, upsertKeyframe } from "./keyframes";
 import { heroEndTime, heroStartTime } from "./hero";
 
-export const DEFAULT_CAMERA_EASING = { x1: 0.16, y1: 1, x2: 0.3, y2: 1 } as const;
+/**
+ * Default "smooth" camera arrival: gentle ease-in-out.
+ * (Old default {0.16,1,0.3,1} was a near-step ease-out — ~97% of the move by midpoint —
+ * so every "smooth" pan felt like a hard ramp then coast.)
+ */
+export const DEFAULT_CAMERA_EASING = { x1: 0.42, y1: 0, x2: 0.58, y2: 1 } as const;
+
+/** Strong ease-out for intentional snappy arrivals (preset). */
+export const CAMERA_EASE_OUT = { x1: 0.2, y1: 0.9, x2: 0.35, y2: 1 } as const;
+
+/** Legacy default that shipped as "smooth" — treated as DEFAULT_CAMERA_EASING at evaluate/migrate. */
+export const LEGACY_CAMERA_SNAP_EASING = { x1: 0.16, y1: 1, x2: 0.3, y2: 1 } as const;
+
+export function isLegacyCameraSnapEasing(easing: { x1: number; y1: number; x2: number; y2: number } | undefined | null) {
+  if (!easing) return false;
+  return (
+    Math.abs(easing.x1 - LEGACY_CAMERA_SNAP_EASING.x1) < 1e-6
+    && Math.abs(easing.y1 - LEGACY_CAMERA_SNAP_EASING.y1) < 1e-6
+    && Math.abs(easing.x2 - LEGACY_CAMERA_SNAP_EASING.x2) < 1e-6
+    && Math.abs(easing.y2 - LEGACY_CAMERA_SNAP_EASING.y2) < 1e-6
+  );
+}
+
+export function resolveCameraEasing(easing: { x1: number; y1: number; x2: number; y2: number } | undefined | null) {
+  if (!easing || isLegacyCameraSnapEasing(easing)) return { ...DEFAULT_CAMERA_EASING };
+  return { ...easing };
+}
 
 export function compositionWorldDimensions(composition: Pick<Composition, "width" | "height">) {
   const height = 4;
@@ -60,27 +86,58 @@ function interpolatePose(from: CameraPose, to: CameraPose, progress: number): Ca
   };
 }
 
+function cameraPoseOf(keyframe: CameraKeyframe, fallback: CameraPose): CameraPose {
+  return { ...(keyframe.value ?? keyframe.pose ?? fallback) };
+}
+
+function normalizeCameraKeyframe(keyframe: CameraKeyframe): CameraKeyframe {
+  // Normalize legacy UI value "smooth" → bezier so curve always applies.
+  return {
+    ...keyframe,
+    interpolation: keyframe.interpolation === "cut" || keyframe.cut
+      ? "cut"
+      : keyframe.interpolation === "linear"
+        ? "linear"
+        : "bezier",
+    cut: keyframe.interpolation === "cut" || Boolean(keyframe.cut),
+    // Soften the old "smooth" snap curve so playback matches the new default.
+    easing: resolveCameraEasing(keyframe.easing),
+  };
+}
+
+/**
+ * Evaluate camera pose at absolute time.
+ *
+ * Important: before the first authored key we HOLD that first pose.
+ * We do NOT animate from composition.camera (center default) — that phantom
+ * pan made every take feel like it "came in from upper-left" whenever keys
+ * lived away from the field origin.
+ */
 export function evaluateCamera(composition: Composition, take: Pick<Take, "cameraKeyframes">, absoluteTime: number): CameraPose {
-  const keyframes = sortKeyframes(take.cameraKeyframes ?? []);
+  const keyframes = sortKeyframes(take.cameraKeyframes ?? []).map(normalizeCameraKeyframe);
   if (!keyframes.length) return { ...composition.camera };
   const time = Math.max(0, absoluteTime);
-  let previous: CameraKeyframe = {
-    id: "composition-camera",
-    time: 0,
-    value: composition.camera,
-    easing: DEFAULT_CAMERA_EASING,
-    holdDuration: 0,
-    interpolation: "bezier",
-  };
-  for (const next of keyframes) {
-    if (time >= next.time) {
-      previous = next;
+  const first = keyframes[0]!;
+  // Hold first key from t=0 until its arrival (and through its hold).
+  if (time < first.time) {
+    return cameraPoseOf(first, composition.camera);
+  }
+
+  let previous = first;
+  for (let index = 1; index < keyframes.length; index += 1) {
+    const arrival = keyframes[index]!;
+    if (time >= arrival.time) {
+      previous = arrival;
       continue;
     }
-    const progress = segmentProgress(previous, next, time);
-    return interpolatePose(previous.value ?? previous.pose ?? composition.camera, next.value ?? next.pose ?? composition.camera, progress);
+    const progress = segmentProgress(previous, arrival, time);
+    return interpolatePose(
+      cameraPoseOf(previous, composition.camera),
+      cameraPoseOf(arrival, composition.camera),
+      progress,
+    );
   }
-  return { ...(previous.value ?? previous.pose ?? composition.camera) };
+  return cameraPoseOf(previous, composition.camera);
 }
 
 export function cameraFrameInField(composition: Composition, pose: CameraPose) {

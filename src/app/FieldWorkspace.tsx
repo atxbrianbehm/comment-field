@@ -4,13 +4,30 @@ import {
   Move3d, Palette, RefreshCw, Shield, Sparkles, Trash2, Unlock, WandSparkles,
 } from "lucide-react";
 import { useState } from "react";
-import type {
-  BuildOrder, CardPlacement, CommentRecord, Composition, GestureSample, ParseResult, PreviewCacheStatus, Project, Take,
+import {
+  alignCardPlacements,
+  distributeCardPlacements,
+  regenerateComposition,
+  type AlignMode,
+  type BuildOrder,
+  type CardPlacement,
+  type CommentRecord,
+  type Composition,
+  type DistributeAxis,
+  type GestureSample,
+  type ParseResult,
+  type PreviewCacheStatus,
+  type Project,
+  type Take,
 } from "@comment-field/engine";
-import type { CacheStatus, CommentSceneHandle, InteractionMode, TransformPatch } from "../renderer/CommentScene";
+import type { CacheStatus, CommentSceneHandle, InteractionMode, SelectOptions, TransformPatch } from "../renderer/CommentScene";
 import { CommentScene } from "../renderer/CommentScene";
 import { Field, PanelSection, SelectField, Slider } from "./Controls";
 import { CurveEditor } from "./MotionEditors";
+
+function styleToggle(label: string, checked: boolean, onChange: (value: boolean) => void) {
+  return <label className="toggle-row"><span>{label}</span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /></label>;
+}
 
 type Workspace = "field" | "design" | "animate";
 type AnimateTab = "entrance" | "camera" | "hero";
@@ -27,6 +44,7 @@ interface FieldWorkspaceProps {
   commentSource: string;
   commentPreview: ParseResult;
   selectedCardId: string | null;
+  selectedCardIds: string[];
   selectedGestureIndex: number | null;
   selectedPlacement: CardPlacement | null;
   selectedComment: CommentRecord | null;
@@ -40,6 +58,7 @@ interface FieldWorkspaceProps {
   sceneRef: RefObject<CommentSceneHandle | null>;
   setCommentSource: Dispatch<SetStateAction<string>>;
   setSelectedCardId: Dispatch<SetStateAction<string | null>>;
+  onSelectCard: (cardId: string | null, options?: SelectOptions) => void;
   setSelectedGestureIndex: Dispatch<SetStateAction<number | null>>;
   setMode: Dispatch<SetStateAction<InteractionMode>>;
   setFieldView: Dispatch<SetStateAction<FieldView>>;
@@ -58,7 +77,9 @@ interface FieldWorkspaceProps {
   clearPreviewCache: (reason?: string, state?: PreviewCacheStatus["state"]) => void;
   pausePlayback: () => void;
   beginManipulation: () => void;
+  endManipulation?: () => void;
   transformCard: (cardId: string, patch: TransformPatch, editReflow: boolean) => void;
+  transformCards: (moves: Array<{ cardId: string; patch: TransformPatch }>, editReflow: boolean) => void;
   completeGesture: (samples: GestureSample[]) => void;
   updateGestureSample: (index: number, patch: Partial<GestureSample>) => void;
   scatter: () => void;
@@ -75,14 +96,61 @@ interface FieldWorkspaceProps {
 export function FieldWorkspace(props: FieldWorkspaceProps) {
   const [mobilePanel, setMobilePanel] = useState<"closed" | "comments" | "controls">("closed");
   const {
-    project, composition, take, duration, time, playing, commentSource, commentPreview, selectedCardId, selectedGestureIndex,
+    project, composition, take, duration, time, playing, commentSource, commentPreview, selectedCardId, selectedCardIds, selectedGestureIndex,
     selectedPlacement, selectedComment, mode, fieldView, rightTab, cacheStatus, previewStatus, previewLabel,
-    previewMemory, sceneRef, setCommentSource, setSelectedCardId, setSelectedGestureIndex, setMode, setFieldView, setRightTab, setWorkspace,
+    previewMemory, sceneRef, setCommentSource, setSelectedCardId, onSelectCard, setSelectedGestureIndex, setMode, setFieldView, setRightTab, setWorkspace,
     setAnimateTab, setCacheStatus, mutateProject, mutateComposition, mutateTake, importComments, loadCommentFile,
-    loadBackground, switchComposition, changeTakeDuration, clearPreviewCache, pausePlayback, beginManipulation,
-    transformCard, completeGesture, updateGestureSample, scatter, fitFieldToComments, addProtectedRegion, removeHero, setHero, updateBuild,
+    loadBackground, switchComposition, changeTakeDuration, clearPreviewCache, pausePlayback, beginManipulation, endManipulation,
+    transformCard, transformCards, completeGesture, updateGestureSample, scatter, fitFieldToComments, addProtectedRegion, removeHero, setHero, updateBuild,
     randomizeBuild, alignCameraToHero, bakeReflow,
   } = props;
+
+  function applyPlacementMap(map: Record<string, { x: number; y: number }>) {
+    const moves = Object.entries(map).map(([cardId, point]) => ({ cardId, patch: point }));
+    if (moves.length) transformCards(moves, mode === "reflow");
+  }
+
+  function runAlign(modeName: AlignMode) {
+    applyPlacementMap(alignCardPlacements(composition.cards, selectedCardIds, modeName));
+  }
+
+  function runDistribute(axis: DistributeAxis) {
+    applyPlacementMap(distributeCardPlacements(composition.cards, selectedCardIds, axis));
+  }
+  const multiScreen = composition.fieldBounds.width > 1 || composition.fieldBounds.height > 1;
+
+  function applyFieldBounds(width: number, height: number) {
+    mutateProject((draft) => {
+      const target = draft.compositions.find((item) => item.id === composition.id);
+      if (!target) return;
+      target.fieldBounds.width = Math.min(8, Math.max(1, width));
+      target.fieldBounds.height = Math.min(8, Math.max(1, height));
+      Object.assign(target, regenerateComposition(target, draft.comments.map((comment) => comment.id)));
+      for (const draftTake of draft.takes.filter((item) => item.compositionId === target.id)) draftTake.reflowTargets = {};
+    });
+    if (width <= 1 && height <= 1) setFieldView("camera");
+  }
+
+  function setMultiScreen(enabled: boolean) {
+    // Default multi-screen is a vertical stack (1×3) so the camera can move up/down through frames.
+    if (enabled) applyFieldBounds(1, 3);
+    else applyFieldBounds(1, 1);
+  }
+
+  function setFieldDimension(axis: "width" | "height", value: number) {
+    let nextWidth = axis === "width" ? value : composition.fieldBounds.width;
+    let nextHeight = axis === "height" ? value : composition.fieldBounds.height;
+    nextWidth = Math.min(8, Math.max(1, Number.isFinite(nextWidth) ? nextWidth : 1));
+    nextHeight = Math.min(8, Math.max(1, Number.isFinite(nextHeight) ? nextHeight : 1));
+    // Keep multi-screen on: if both axes would collapse to 1×1 (e.g. default 1×3 → height 1),
+    // expand the other axis so 1-screen-high / 1-screen-wide layouts are possible.
+    if (nextWidth <= 1 && nextHeight <= 1) {
+      if (axis === "height") nextWidth = 3;
+      else nextHeight = 3;
+    }
+    applyFieldBounds(nextWidth, nextHeight);
+  }
+
   const telemetry = sceneRef.current?.getPerformanceTelemetry();
   return (
     <>
@@ -111,7 +179,15 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
         <PanelSection title="Compositions" meta="Shared copy + design">
           <div className="composition-list">{project.compositions.map((item) => <button key={item.id} className={item.id === composition.id ? "is-active" : ""} onClick={() => switchComposition(item.id)}><span>{item.name}</span><small>{item.width} × {item.height}</small></button>)}</div>
           <div className="composition-settings">
-            <Field label="Take length" type="number" min={1 / composition.frameRate} max={300} step={1 / composition.frameRate} value={duration} onChange={(event) => changeTakeDuration(Number(event.target.value))} />
+            <Field
+              label="Take length (frames)"
+              type="number"
+              min={1}
+              max={Math.round(300 * composition.frameRate)}
+              step={1}
+              value={Math.round(duration * composition.frameRate)}
+              onChange={(event) => changeTakeDuration(Math.max(1, Math.round(Number(event.target.value))) / composition.frameRate)}
+            />
             <SelectField label="Frame rate" value={composition.frameRate} onChange={(event) => mutateComposition((draft) => { draft.frameRate = Number(event.target.value); })}><option value={24}>24 fps</option><option value={30}>30 fps</option><option value={60}>60 fps</option></SelectField>
           </div>
         </PanelSection>
@@ -119,11 +195,11 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
 
       <section className="workspace">
         <div className="viewer-toolbar">
-          <div className="viewer-meta"><strong>{composition.name}</strong><span>{composition.fieldBounds.width}×{composition.fieldBounds.height} field · {composition.frameRate} fps</span></div>
-          <div className="view-switcher">
+          <div className="viewer-meta"><strong>{composition.name}</strong><span>{multiScreen ? `${composition.fieldBounds.width}×${composition.fieldBounds.height} field · ` : ""}{composition.frameRate} fps</span></div>
+          {multiScreen && <div className="view-switcher">
             <button className={fieldView === "camera" ? "is-active" : ""} onClick={() => setFieldView("camera")}><Camera size={14} />Camera</button>
             <button className={fieldView === "overview" ? "is-active" : ""} onClick={() => { setFieldView("overview"); requestAnimationFrame(() => sceneRef.current?.fitField()); }}><Layers3 size={14} />Overview</button>
-          </div>
+          </div>}
           <details className={`cache-badge ${previewStatus.state}`}>
             <summary>
               <span>Assets {cacheStatus.state === "ready" ? "Ready" : "Rebuilding"} · {cacheStatus.ready}/{cacheStatus.total}</span>
@@ -150,7 +226,32 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
         </div>
         <div className="stage-wrap">
           <div className="stage-grid" />
-          <CommentScene ref={sceneRef} composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} cardStyle={project.cardStyle} renderSettings={project.renderSettings} time={time} selectedCardId={selectedCardId} selectedGestureIndex={selectedGestureIndex} mode={mode} viewMode={playing ? "camera" : fieldView} showTransformHandles showGesturePath={rightTab === "build"} onSelect={setSelectedCardId} onSelectGestureSample={setSelectedGestureIndex} onGestureSampleChange={updateGestureSample} onTransformCard={transformCard} onGestureComplete={completeGesture} onCacheStatus={setCacheStatus} onManipulationStart={beginManipulation} />
+          <CommentScene
+            ref={sceneRef}
+            composition={composition}
+            take={take}
+            entranceMotion={project.entranceMotion}
+            comments={project.comments}
+            cardStyle={project.cardStyle}
+            renderSettings={project.renderSettings}
+            time={time}
+            selectedCardId={selectedCardId}
+            selectedCardIds={selectedCardIds}
+            selectedGestureIndex={selectedGestureIndex}
+            mode={mode}
+            viewMode={playing || !multiScreen ? "camera" : fieldView}
+            showTransformHandles
+            showGesturePath={rightTab === "build"}
+            onSelect={onSelectCard}
+            onSelectGestureSample={setSelectedGestureIndex}
+            onGestureSampleChange={updateGestureSample}
+            onTransformCard={transformCard}
+            onTransformCards={transformCards}
+            onGestureComplete={completeGesture}
+            onCacheStatus={setCacheStatus}
+            onManipulationStart={beginManipulation}
+            onManipulationEnd={endManipulation}
+          />
           {mode === "record" && <div className="record-hint"><CircleDot size={13} />Drag a path across the field</div>}
         </div>
       </section>
@@ -166,8 +267,23 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
         {rightTab === "layout" && <>
           <PanelSection title="Scatter field" meta="Deterministic">
             <Field label="Visible seed" value={composition.seed} onChange={(event) => mutateComposition((draft) => { draft.seed = event.target.value; })} />
-            <Field label="Field width" type="number" min={1} max={8} step={1} value={composition.fieldBounds.width} onChange={(event) => mutateComposition((draft) => { draft.fieldBounds.width = Math.min(8, Math.max(1, Number(event.target.value))); })} />
-            <Field label="Field height" type="number" min={1} max={8} step={1} value={composition.fieldBounds.height} onChange={(event) => mutateComposition((draft) => { draft.fieldBounds.height = Math.min(8, Math.max(1, Number(event.target.value))); })} />
+            {styleToggle("Multi-screen field", multiScreen, setMultiScreen)}
+            {multiScreen ? (
+              <>
+                <p className="panel-note">
+                  Width/height are screen counts (not pixels). Examples: <strong>1×3</strong> tall stack, <strong>3×1</strong> one screen high and three wide, <strong>3×3</strong> grid.
+                </p>
+                <Field label="Screens wide" type="number" min={1} max={8} step={1} value={composition.fieldBounds.width} onChange={(event) => setFieldDimension("width", Number(event.target.value))} />
+                <Field label="Screens high" type="number" min={1} max={8} step={1} value={composition.fieldBounds.height} onChange={(event) => setFieldDimension("height", Number(event.target.value))} />
+                <div className="button-pair">
+                  <button type="button" className="secondary-button" onClick={() => applyFieldBounds(1, 3)}>1 wide · 3 high</button>
+                  <button type="button" className="secondary-button" onClick={() => applyFieldBounds(3, 1)}>3 wide · 1 high</button>
+                </div>
+                <button type="button" className="secondary-button wide" onClick={() => applyFieldBounds(3, 3)}>3×3 grid</button>
+              </>
+            ) : (
+              <p className="panel-note">Cards stay inside a single camera frame. Turn this on only if you want to animate across extra screens.</p>
+            )}
             <Slider label="Density" min={0.3} max={1} step={0.05} value={composition.scatter.density} onChange={(event) => mutateComposition((draft) => { draft.scatter.density = Number(event.target.value); })} />
             <Slider label="Spacing" min={0.04} max={0.25} step={0.01} value={composition.scatter.minSpacing} onChange={(event) => mutateComposition((draft) => { draft.scatter.minSpacing = Number(event.target.value); })} />
             <Slider label="Size variation" min={0} max={0.5} step={0.01} value={composition.scatter.sizeVariation} onChange={(event) => mutateComposition((draft) => { draft.scatter.sizeVariation = Number(event.target.value); })} />
@@ -175,33 +291,78 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             <Slider label="Depth near" min={-1.5} max={1.5} step={0.05} value={composition.scatter.depthMin} onChange={(event) => mutateComposition((draft) => { draft.scatter.depthMin = Number(event.target.value); })} />
             <Slider label="Depth far" min={-1.5} max={1.5} step={0.05} value={composition.scatter.depthMax} onChange={(event) => mutateComposition((draft) => { draft.scatter.depthMax = Number(event.target.value); })} />
             <button className="primary-button wide" onClick={scatter}><WandSparkles size={16} />Generate field</button>
-            <div className="button-pair">
-              <button className="secondary-button" onClick={fitFieldToComments}>Fit to comments</button>
-              <button className="secondary-button" onClick={() => { setFieldView("overview"); requestAnimationFrame(() => sceneRef.current?.fitField()); }}>Fit field</button>
-            </div>
-            <button className="secondary-button wide" onClick={() => setFieldView("camera")}><Camera size={15} />Frame camera</button>
+            {multiScreen && (
+              <>
+                <div className="button-pair">
+                  <button className="secondary-button" onClick={fitFieldToComments}>Fit to comments</button>
+                  <button className="secondary-button" onClick={() => { setFieldView("overview"); requestAnimationFrame(() => sceneRef.current?.fitField()); }}>Fit field</button>
+                </div>
+                <button className="secondary-button wide" onClick={() => setFieldView("camera")}><Camera size={15} />Frame camera</button>
+              </>
+            )}
           </PanelSection>
           <PanelSection title="Protected regions" meta={`${composition.protectedRegions.length}`}>
             <button className="secondary-button wide" onClick={addProtectedRegion}><Shield size={16} />Add central region</button>
           </PanelSection>
-          <PanelSection title="Selected card" meta={selectedComment?.handle || (selectedComment ? "Message-only" : "None")}>
+          <PanelSection title="Selection" meta={selectedCardIds.length > 1 ? `${selectedCardIds.length} posts` : (selectedComment?.handle || (selectedComment ? "Message-only" : "None"))}>
+            {selectedCardIds.length > 0 && (
+              <>
+                <p className="panel-note">
+                  {selectedCardIds.length} selected. Click empty space or press Esc to clear.
+                  {selectedCardIds.length > 1 ? " Drag any selected post to move the group. Alt-drag pans the overview." : ""}
+                </p>
+                <button type="button" className="secondary-button wide" onClick={() => onSelectCard(null, { ids: [] })}>Clear selection</button>
+              </>
+            )}
+            {selectedCardIds.length > 1 && (
+              <>
+                <div className="align-grid">
+                  <button type="button" className="secondary-button" onClick={() => runAlign("left")}>Align left</button>
+                  <button type="button" className="secondary-button" onClick={() => runAlign("center")}>Align center</button>
+                  <button type="button" className="secondary-button" onClick={() => runAlign("right")}>Align right</button>
+                  <button type="button" className="secondary-button" onClick={() => runAlign("top")}>Align top</button>
+                  <button type="button" className="secondary-button" onClick={() => runAlign("middle")}>Align middle</button>
+                  <button type="button" className="secondary-button" onClick={() => runAlign("bottom")}>Align bottom</button>
+                </div>
+                <div className="button-pair">
+                  <button type="button" className="secondary-button" disabled={selectedCardIds.length < 3} onClick={() => runDistribute("horizontal")}>Distribute H</button>
+                  <button type="button" className="secondary-button" disabled={selectedCardIds.length < 3} onClick={() => runDistribute("vertical")}>Distribute V</button>
+                </div>
+              </>
+            )}
             {selectedPlacement ? <>
               <p className="selected-copy">“{selectedComment?.message}”</p>
               <Slider label="Depth" min={-1} max={1.5} step={0.01} value={selectedPlacement.z} disabled={selectedPlacement.locked} onChange={(event) => mutateComposition((draft) => { const card = draft.cards.find((item) => item.cardId === selectedPlacement.cardId); if (card) card.z = Number(event.target.value); })} />
-              <Slider label="Scale" min={0.35} max={2.5} step={0.01} value={selectedPlacement.scale} disabled={selectedPlacement.locked} onChange={(event) => transformCard(selectedPlacement.cardId, { scale: Number(event.target.value) }, false)} />
-              <Slider label="Rotation" min={-0.8} max={0.8} step={0.01} value={selectedPlacement.rotation} disabled={selectedPlacement.locked} display={`${(selectedPlacement.rotation * 57.2958).toFixed(1)}°`} onChange={(event) => transformCard(selectedPlacement.cardId, { rotation: Number(event.target.value) }, false)} />
+              <Slider label="Scale" min={0.35} max={2.5} step={0.01} value={selectedPlacement.scale} disabled={selectedPlacement.locked || selectedCardIds.length > 1} onChange={(event) => transformCard(selectedPlacement.cardId, { scale: Number(event.target.value) }, false)} />
+              <Slider label="Rotation" min={-0.8} max={0.8} step={0.01} value={selectedPlacement.rotation} disabled={selectedPlacement.locked || selectedCardIds.length > 1} display={`${(selectedPlacement.rotation * 57.2958).toFixed(1)}°`} onChange={(event) => transformCard(selectedPlacement.cardId, { rotation: Number(event.target.value) }, false)} />
               <div className="button-pair">
                 <button className="secondary-button" onClick={() => mutateComposition((draft) => { const card = draft.cards.find((item) => item.cardId === selectedPlacement.cardId); if (card) card.locked = !card.locked; })}>{selectedPlacement.locked ? <Unlock size={16} /> : <Lock size={16} />}{selectedPlacement.locked ? "Unlock" : "Lock"}</button>
                 {take.hero?.cardId === selectedPlacement.cardId ? <button className="danger-button" onClick={removeHero}><Trash2 size={16} />Remove hero</button> : <button className="accent-button" onClick={setHero}><Sparkles size={16} />Make hero</button>}
               </div>
-            </> : <p className="empty-copy">Select a post to move it, scale from its corners, or rotate from the top handle.</p>}
+            </> : <p className="empty-copy">Select a post to move it. In Overview, drag empty space to marquee-select, or Alt-drag to pan.</p>}
           </PanelSection>
         </>}
         {rightTab === "build" && <><PanelSection title="Trigger timing" meta={`${take.cardTriggers.length} triggers`}>
           <Field label="Build seed" value={take.build.seed} onChange={(event) => updateBuild("seed", event.target.value)} />
           <SelectField label="Order" value={take.build.order} onChange={(event) => updateBuild("order", event.target.value as BuildOrder)}><option value="random">Random</option><option value="left-to-right">Left to right</option><option value="outside-in">Outside inward</option><option value="depth">Depth order</option></SelectField>
-          <Slider label="Stagger start" min={0} max={6} step={0.1} value={take.build.staggerStart} display={`${take.build.staggerStart.toFixed(1)}s`} onChange={(event) => updateBuild("staggerStart", Number(event.target.value))} />
-          <Slider label="Stagger end" min={0} max={6} step={0.1} value={take.build.staggerEnd} display={`${take.build.staggerEnd.toFixed(1)}s`} onChange={(event) => updateBuild("staggerEnd", Number(event.target.value))} />
+          <Slider
+            label="Stagger start"
+            min={0}
+            max={Math.round(6 * composition.frameRate)}
+            step={1}
+            value={Math.round(take.build.staggerStart * composition.frameRate)}
+            display={`${Math.round(take.build.staggerStart * composition.frameRate)}f`}
+            onChange={(event) => updateBuild("staggerStart", Number(event.target.value) / composition.frameRate)}
+          />
+          <Slider
+            label="Stagger end"
+            min={0}
+            max={Math.round(6 * composition.frameRate)}
+            step={1}
+            value={Math.round(take.build.staggerEnd * composition.frameRate)}
+            display={`${Math.round(take.build.staggerEnd * composition.frameRate)}f`}
+            onChange={(event) => updateBuild("staggerEnd", Number(event.target.value) / composition.frameRate)}
+          />
           <button className="accent-button wide" onClick={() => { setWorkspace("animate"); setAnimateTab("entrance"); }}><Clapperboard size={16} />Edit entrance template</button>
           <button className="secondary-button wide" onClick={randomizeBuild}><Sparkles size={16} />Randomize triggers</button>
           <button className={`record-button wide ${mode === "record" ? "is-recording" : ""}`} onClick={() => { setMode(mode === "record" ? "select" : "record"); pausePlayback(); }}><CircleDot size={16} />{mode === "record" ? "Recording: draw in viewer" : "Record mouse build"}</button>
@@ -212,7 +373,15 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             const sample = take.gestureSamples[selectedGestureIndex];
             if (!sample) return null;
             return <>
-              <Slider label="Point time" min={0} max={duration} step={1 / composition.frameRate} value={sample.time} display={`${sample.time.toFixed(2)}s`} onChange={(event) => updateGestureSample(selectedGestureIndex, { time: Number(event.target.value) })} />
+              <Slider
+                label="Point frame"
+                min={0}
+                max={Math.round(duration * composition.frameRate)}
+                step={1}
+                value={Math.round(sample.time * composition.frameRate)}
+                display={`${Math.round(sample.time * composition.frameRate)}f`}
+                onChange={(event) => updateGestureSample(selectedGestureIndex, { time: Number(event.target.value) / composition.frameRate })}
+              />
               <Slider label="Screen X" min={0} max={1} step={0.005} value={sample.x} display={`${Math.round(sample.x * 100)}%`} onChange={(event) => updateGestureSample(selectedGestureIndex, { x: Number(event.target.value) })} />
               <Slider label="Screen Y" min={0} max={1} step={0.005} value={sample.y} display={`${Math.round(sample.y * 100)}%`} onChange={(event) => updateGestureSample(selectedGestureIndex, { y: Number(event.target.value) })} />
               <div className="button-pair">

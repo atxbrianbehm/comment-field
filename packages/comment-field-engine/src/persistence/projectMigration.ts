@@ -1,3 +1,4 @@
+import { DEFAULT_CAMERA_EASING, isLegacyCameraSnapEasing } from "../animation/camera";
 import { PROJECT_VERSION, type Project, type Take } from "../models/types";
 import { DEFAULT_ENTRANCE_MOTION, DEFAULT_RENDER_SETTINGS } from "../models/defaults";
 import { cloneValue } from "../utils/clone";
@@ -24,6 +25,7 @@ export function migrateProject(project: Project): Project {
   migrated.renderSettings.motionBlur.enabled ??= false;
   migrated.renderSettings.motionBlur.shutterAngle ??= DEFAULT_RENDER_SETTINGS.motionBlur.shutterAngle;
   migrated.renderSettings.motionBlur.strength ??= DEFAULT_RENDER_SETTINGS.motionBlur.strength;
+  migrated.renderSettings.transparentExport ??= DEFAULT_RENDER_SETTINGS.transparentExport;
   const legacyDurations = new Map<string, number>();
   for (const composition of migrated.compositions) {
     const legacyComposition = composition as CompositionWithLegacyDuration;
@@ -73,8 +75,16 @@ export function migrateProject(project: Project): Project {
     migrated.entranceMotion ??= cloneValue(DEFAULT_ENTRANCE_MOTION);
   }
   migrated.entranceMotion.opacityEasing ??= cloneValue(migrated.entranceMotion.easing);
+  migrated.entranceMotion.pathMode ??= DEFAULT_ENTRANCE_MOTION.pathMode;
+  migrated.entranceMotion.rainDistance ??= DEFAULT_ENTRANCE_MOTION.rainDistance;
+  migrated.entranceMotion.rainLateral ??= DEFAULT_ENTRANCE_MOTION.rainLateral;
   for (const take of migrated.takes) {
-    if (take.entranceOverride) take.entranceOverride.opacityEasing ??= cloneValue(take.entranceOverride.easing);
+    if (take.entranceOverride) {
+      take.entranceOverride.opacityEasing ??= cloneValue(take.entranceOverride.easing);
+      take.entranceOverride.pathMode ??= DEFAULT_ENTRANCE_MOTION.pathMode;
+      take.entranceOverride.rainDistance ??= DEFAULT_ENTRANCE_MOTION.rainDistance;
+      take.entranceOverride.rainLateral ??= DEFAULT_ENTRANCE_MOTION.rainLateral;
+    }
   }
   if (legacyVersion < 4) {
     const preserveLegacyMotion = (motion: Project["entranceMotion"]) => {
@@ -105,7 +115,11 @@ export function migrateProject(project: Project): Project {
       const value = keyframe.value ?? legacy.pose;
       const isLinear = keyframe.easing?.x1 === 0 && keyframe.easing?.y1 === 0 && keyframe.easing?.x2 === 1 && keyframe.easing?.y2 === 1;
       const interpolation = keyframe.interpolation ?? (legacy.cut ? "cut" : isLinear ? "linear" : "bezier");
-      const next = { ...keyframe, value, interpolation };
+      // v10: old "smooth" default was a near-step ease-out; rewrite to gentle ease-in-out.
+      const easing = legacyVersion < 10 && isLegacyCameraSnapEasing(keyframe.easing)
+        ? { ...DEFAULT_CAMERA_EASING }
+        : keyframe.easing;
+      const next = { ...keyframe, value, interpolation, easing };
       delete (next as typeof legacy).pose;
       delete (next as typeof legacy).cut;
       return next;

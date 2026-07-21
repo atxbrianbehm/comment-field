@@ -7,6 +7,7 @@ export * from "./animation/keyframes";
 export * from "./animation/motionDynamics";
 export * from "./fixtures/defaultComments";
 export * from "./import/parseComments";
+export * from "./layout/align";
 export * from "./layout/scatter";
 export * from "./models/defaults";
 export * from "./models/types";

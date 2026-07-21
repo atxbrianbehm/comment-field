@@ -26,6 +26,12 @@ function hashString(value: string) {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+/**
+ * Bump when entrance/layout evaluation or preview pixel orientation changes without a
+ * matching project-data change. Stale IDB frames would otherwise play inverted/old motion.
+ */
+export const PREVIEW_CACHE_EVAL_VERSION = 4;
+
 export function createPreviewCacheKey(
   composition: Composition,
   take: Take,
@@ -35,6 +41,7 @@ export function createPreviewCacheKey(
   renderSettings?: RenderSettings,
 ) {
   const source = JSON.stringify({
+    evalVersion: PREVIEW_CACHE_EVAL_VERSION,
     composition: {
       id: composition.id,
       width: composition.width,
@@ -63,20 +70,31 @@ export function createPreviewCacheKey(
     cardStyle,
     renderSettings,
   });
-  return `preview-v2-${hashString(source)}-${source.length}`;
+  return `preview-v${PREVIEW_CACHE_EVAL_VERSION}-${hashString(source)}-${source.length}`;
 }
 
-export function flipWebGpuReadback(pixels: Uint8Array, width: number, height: number) {
+/**
+ * Pack GPU readback into tight RGBA rows for ImageData / canvas encode.
+ * WebGPU copyTextureToBuffer is top-down (matches canvas). WebGL readPixels is bottom-up and needs flipY.
+ * Always flipping WebGPU frames inverted cached playback vs live, so rain looked like it randomly reversed.
+ */
+export function packReadbackPixels(pixels: Uint8Array, width: number, height: number, flipY = false) {
   const rowBytes = width * 4;
   const minimumBytes = rowBytes * height;
   if (pixels.length < minimumBytes) throw new Error("WebGPU preview readback returned incomplete pixel data");
   const sourceStride = height <= 1 ? rowBytes : (pixels.length - rowBytes) / (height - 1);
   if (!Number.isInteger(sourceStride) || sourceStride < rowBytes) throw new Error("WebGPU preview readback returned an invalid row stride");
-  const flipped = new Uint8ClampedArray(minimumBytes);
+  const packed = new Uint8ClampedArray(minimumBytes);
   for (let row = 0; row < height; row += 1) {
-    flipped.set(pixels.subarray(row * sourceStride, row * sourceStride + rowBytes), (height - row - 1) * rowBytes);
+    const destRow = flipY ? height - row - 1 : row;
+    packed.set(pixels.subarray(row * sourceStride, row * sourceStride + rowBytes), destRow * rowBytes);
   }
-  return flipped;
+  return packed;
+}
+
+/** @deprecated Use packReadbackPixels — kept for WebGL bottom-up readbacks. */
+export function flipWebGpuReadback(pixels: Uint8Array, width: number, height: number) {
+  return packReadbackPixels(pixels, width, height, true);
 }
 
 export function fitPreviewDimensions(width: number, height: number, longEdge: number) {

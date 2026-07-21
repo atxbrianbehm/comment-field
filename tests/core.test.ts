@@ -12,6 +12,7 @@ import {
   evaluateScene,
   evaluateSpatialPath,
   evaluateSpringOffset,
+  resolveEntrancePath,
   fieldPointToWorld,
   findKeyframeAt,
   generateReflowTargets,
@@ -142,11 +143,71 @@ describe("deterministic project core", () => {
       { id: "two", time: 3, pose: { ...composition.camera, x: 3 }, easing: { x1: 0, y1: 0, x2: 1, y2: 1 }, holdDuration: 0, cut: false },
       { id: "cut", time: 4, pose: { ...composition.camera, x: 9 }, easing: { x1: 0, y1: 0, x2: 1, y2: 1 }, holdDuration: 0, cut: true },
     ];
-    expect(evaluateCamera(composition, take, 0.5).x).toBeCloseTo(0.5);
+    // Before the first key: hold first pose (no phantom pan from composition center).
+    expect(evaluateCamera(composition, take, 0.5).x).toBe(1);
     expect(evaluateCamera(composition, take, 1.5).x).toBe(1);
     expect(evaluateCamera(composition, take, 2.5).x).toBeCloseTo(2);
     expect(evaluateCamera(composition, take, 3.9).x).toBe(3);
     expect(evaluateCamera(composition, take, 4).x).toBe(9);
+  });
+
+  it("does not invent a pan from composition.camera when keys sit off-center", () => {
+    const project = createDefaultProject();
+    const composition = project.compositions[0];
+    const take = structuredClone(project.takes[0]);
+    // Both keys share the same off-center framing — mid-segment must stay put.
+    const framed = { ...composition.camera, x: 1.4, y: -0.8, z: 4.2 };
+    take.cameraKeyframes = [
+      { id: "a", time: 1, value: framed, easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 }, holdDuration: 0, interpolation: "bezier" },
+      { id: "b", time: 3, value: { ...framed }, easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 }, holdDuration: 0, interpolation: "bezier" },
+    ];
+    expect(evaluateCamera(composition, take, 0).x).toBeCloseTo(1.4);
+    expect(evaluateCamera(composition, take, 0).y).toBeCloseTo(-0.8);
+    expect(evaluateCamera(composition, take, 2).x).toBeCloseTo(1.4);
+    expect(evaluateCamera(composition, take, 2).y).toBeCloseTo(-0.8);
+    expect(evaluateCamera(composition, take, 2).z).toBeCloseTo(4.2);
+  });
+
+  it("applies camera arrival bezier so mid-segment pose depends on the curve", () => {
+    const project = createDefaultProject();
+    const composition = project.compositions[0];
+    const base = { ...composition.camera, x: 0 };
+    // Strong ease-out (not the legacy snap identity — that is remapped to soft smooth).
+    const easeOut = { x1: 0.2, y1: 0.9, x2: 0.35, y2: 1 };
+    const easeIn = { x1: 0.7, y1: 0, x2: 0.84, y2: 0 };
+    const linear = { x1: 0, y1: 0, x2: 1, y2: 1 };
+    const makeTake = (easing: typeof linear, interpolation: "bezier" | "linear" = "bezier") => {
+      const take = structuredClone(project.takes[0]);
+      take.cameraKeyframes = [
+        { id: "a", time: 0, value: base, easing: linear, holdDuration: 0, interpolation: "bezier" as const },
+        { id: "b", time: 2, value: { ...base, x: 2 }, easing, holdDuration: 0, interpolation },
+      ];
+      return take;
+    };
+    const midOut = evaluateCamera(composition, makeTake(easeOut), 1).x;
+    const midIn = evaluateCamera(composition, makeTake(easeIn), 1).x;
+    const midLin = evaluateCamera(composition, makeTake(linear, "linear"), 1).x;
+    expect(midLin).toBeCloseTo(1, 2);
+    // Ease-out spends more of the move early → further along at midpoint.
+    expect(midOut).toBeGreaterThan(midLin + 0.15);
+    // Ease-in spends more of the move late → less far at midpoint.
+    expect(midIn).toBeLessThan(midLin - 0.15);
+  });
+
+  it("treats legacy snap 'smooth' easing as gentle ease-in-out", () => {
+    const project = createDefaultProject();
+    const composition = project.compositions[0];
+    const take = structuredClone(project.takes[0]);
+    const base = { ...composition.camera, x: 0 };
+    take.cameraKeyframes = [
+      { id: "a", time: 0, value: base, easing: { x1: 0, y1: 0, x2: 1, y2: 1 }, holdDuration: 0, interpolation: "bezier" },
+      // Old default "smooth" curve that used to be ~97% done by midpoint.
+      { id: "b", time: 2, value: { ...base, x: 2 }, easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 }, holdDuration: 0, interpolation: "bezier" },
+    ];
+    const mid = evaluateCamera(composition, take, 1).x;
+    // Soft ease-in-out should be near the linear midpoint, not the old snap (~1.94).
+    expect(mid).toBeGreaterThan(0.85);
+    expect(mid).toBeLessThan(1.15);
   });
 
   it("produces stronger camera parallax for near cards", () => {
@@ -298,6 +359,37 @@ describe("deterministic project core", () => {
     expect(evaluateAmbientDrift("field", "one", 3.25, 1, motion)).toEqual(first);
     expect(evaluateAmbientDrift("field", "two", 3.25, 1, motion)).not.toEqual(first);
     expect(evaluateAmbientDrift("field", "one", 3.25, 1, { ...motion, driftAmount: 0, driftRotation: 0 })).toEqual({ x: 0, y: 0, rotation: 0 });
+  });
+
+  it("rain path mode starts cards below settle with per-card lateral variation", () => {
+    const project = createDefaultProject();
+    const rain = {
+      ...project.entranceMotion,
+      pathMode: "rain" as const,
+      rainDistance: 0.6,
+      rainLateral: 0.25,
+      driftAmount: 0,
+      driftRotation: 0,
+      springAmount: 0,
+    };
+    const first = resolveEntrancePath(rain, "seed", "card-a");
+    expect(resolveEntrancePath(rain, "seed", "card-a")).toEqual(first);
+    expect(first.start.y).toBeCloseTo(0.6, 12);
+    expect(Math.abs(first.start.x)).toBeLessThanOrEqual(0.25);
+    const second = resolveEntrancePath(rain, "seed", "card-b");
+    expect(second.start.y).toBeCloseTo(0.6, 12);
+    expect(second.start.x).not.toBeCloseTo(first.start.x, 6);
+    const start = evaluateEntranceComponents(rain, 0, 0, "seed", "card-a");
+    expect(start.position.y).toBeGreaterThan(0);
+    expect(start.position.y).toBeCloseTo(first.start.y, 10);
+    const settled = evaluateEntranceComponents(rain, 1, 1, "seed", "card-a");
+    expect(settled.position.x).toBeCloseTo(0, 12);
+    expect(settled.position.y).toBeCloseTo(0, 12);
+    const midA = evaluateEntranceComponents(rain, 0.4, 0.4, "seed", "card-a");
+    const midB = evaluateEntranceComponents(rain, 0.4, 0.4, "seed", "card-b");
+    expect(midA.position.x).not.toBeCloseTo(midB.position.x, 6);
+    expect(midA.position.y).toBeGreaterThan(0);
+    expect(midB.position.y).toBeGreaterThan(0);
   });
 
   it("reframes entrance paths without changing their stored motion coordinates", () => {
@@ -460,7 +552,7 @@ describe("deterministic project core", () => {
     expect(createPreviewCacheKey({ ...composition, backgroundColor: "#000000" }, take, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(key);
     expect(createPreviewCacheKey(composition, take, { ...project.entranceMotion, driftAmount: 0.02 }, project.comments, project.cardStyle)).not.toBe(key);
     expect(createPreviewCacheKey(composition, { ...take, duration: take.duration + 1 }, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(key);
-    expect(createPreviewCacheKey(composition, take, project.entranceMotion, project.comments, project.cardStyle, { motionBlur: { ...project.renderSettings.motionBlur, enabled: true } })).not.toBe(
+    expect(createPreviewCacheKey(composition, take, project.entranceMotion, project.comments, project.cardStyle, { ...project.renderSettings, motionBlur: { ...project.renderSettings.motionBlur, enabled: true } })).not.toBe(
       createPreviewCacheKey(composition, take, project.entranceMotion, project.comments, project.cardStyle, project.renderSettings),
     );
     expect(createPreviewCacheKey(composition, { ...take, cameraKeyframes: [{ id: "camera", time: 1, pose: { ...composition.camera, x: 1 }, easing: { x1: 0, y1: 0, x2: 1, y2: 1 }, holdDuration: 0, cut: false }] }, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(key);

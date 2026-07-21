@@ -1,4 +1,4 @@
-import type { EntranceMotionTemplate, Point2D } from "../models/types";
+import type { EntranceMotionTemplate, Point2D, SpatialBezierPath } from "../models/types";
 import { clamp, lerp } from "../utils/math";
 import { evaluateBezierCurve, evaluateSpatialPath } from "./bezier";
 
@@ -11,6 +11,30 @@ function hashUnit(value: string) {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0) / 4294967295;
+}
+
+/**
+ * Builds a deterministic bottom-to-top entrance path for one card.
+ * Lateral start is random in [-rainLateral, rainLateral]; vertical start is below settle (positive field y).
+ * Control points introduce mild left/right sway so arrivals don't all follow the same line.
+ */
+export function resolveEntrancePath(
+  motion: EntranceMotionTemplate,
+  seed: string,
+  cardId: string,
+): SpatialBezierPath {
+  if (motion.pathMode !== "rain") return motion.path;
+  // Positive field Y is down-screen; start below settle so cards pop up into place.
+  const distance = Math.max(0.05, Number.isFinite(motion.rainDistance) ? motion.rainDistance : 0.55);
+  const spread = Math.max(0, Number.isFinite(motion.rainLateral) ? motion.rainLateral : 0.22);
+  const lateral = (hashUnit(`${seed}:${cardId}:rain-x`) * 2 - 1) * spread;
+  const sway = (hashUnit(`${seed}:${cardId}:rain-sway`) * 2 - 1) * spread * 0.45;
+  const midSway = (hashUnit(`${seed}:${cardId}:rain-mid`) * 2 - 1) * spread * 0.35;
+  return {
+    start: { x: lateral, y: distance },
+    control1: { x: lateral * 0.75 + sway, y: distance * 0.68 },
+    control2: { x: midSway * 0.5, y: distance * 0.28 },
+  };
 }
 
 function smoothstep(edge0: number, edge1: number, value: number) {
@@ -57,16 +81,18 @@ export function evaluateEntranceComponents(
   const opacityProgress = evaluateBezierCurve(motion.opacityEasing, clampedProgress);
   const springOffset = evaluateSpringOffset(rawProgress, motion);
   const transformProgress = easedProgress + springOffset;
-  const pathOffset = evaluateSpatialPath(motion.path, easedProgress);
+  const path = resolveEntrancePath(motion, seed, cardId);
+  const pathOffset = evaluateSpatialPath(path, easedProgress);
   const springPosition: Point2D = {
-    x: -motion.path.start.x * springOffset,
-    y: -motion.path.start.y * springOffset,
+    x: -path.start.x * springOffset,
+    y: -path.start.y * springOffset,
   };
   const driftFade = smoothstep(0.68, 1, rawProgress);
   const drift = evaluateAmbientDrift(seed, cardId, absoluteTime, driftFade, motion);
   return {
     easedProgress,
     transformProgress,
+    path,
     position: {
       x: pathOffset.x + springPosition.x + drift.x,
       y: pathOffset.y + springPosition.y + drift.y,

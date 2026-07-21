@@ -1,41 +1,24 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Camera, Copy, Pause, Play, Plus, RotateCcw, SkipBack, SkipForward, Trash2 } from "lucide-react";
+﻿import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Pause, Play, RotateCcw } from "lucide-react";
 import {
-  cameraFrameInField,
-  compositionWorldDimensions,
-  DEFAULT_CAMERA_EASING,
-  evaluateCamera,
   evaluateEntranceComponents,
-  fieldPointToWorld,
-  findKeyframeAt,
-  heroStartTime,
-  projectWorldPoint,
-  snapTime,
-  sortedHeroKeyframes,
-  sortKeyframes,
-  upsertCameraKeyframe,
-  upsertKeyframe,
-  type CameraKeyframe,
-  type CameraPose,
+  resolveEntrancePath,
   type CardStyle,
   type CommentRecord,
-  type Composition,
   type EntranceMotionTemplate,
-  type HeroKeyframe,
-  type HeroPerformance,
+  type EntrancePathMode,
   type Point2D,
-  type Take,
 } from "@comment-field/engine";
-import { CommentScene, type CacheStatus, type CommentSceneHandle, type TransformPatch } from "../renderer/CommentScene";
 import { CardPreview } from "./CardPreview";
 import { BezierOverlay, CurveEditor } from "./MotionEditors";
 import { DEFAULT_ENTRANCE_VIEWPORT, editorPointToMotion, frameEntrancePath, motionPointToEditor } from "./motionViewport";
-import { Field, PanelSection, SelectField, Slider } from "./Controls";
+import { PanelSection, SelectField, Slider } from "./Controls";
 
 export function EntranceWorkspace({
   comment,
   style,
   motion,
+  frameRate = 24,
   onMotionChange,
   onBack,
   onReset,
@@ -43,6 +26,7 @@ export function EntranceWorkspace({
   comment: CommentRecord;
   style: CardStyle;
   motion: EntranceMotionTemplate;
+  frameRate?: number;
   onMotionChange: (motion: EntranceMotionTemplate) => void;
   onBack: () => void;
   onReset: () => void;
@@ -71,8 +55,10 @@ export function EntranceWorkspace({
 
   const previewTime = progress * previewDuration;
   const motionSample = evaluateEntranceComponents(motion, previewTime / motion.duration, previewTime, "entrance-preview", comment.id);
+  const activePath = motionSample.path;
+  const isRain = motion.pathMode === "rain";
   const visualPoint = motionPointToEditor(motionSample.position, viewport);
-  const startPoint = motionPointToEditor(motion.path.start, viewport);
+  const startPoint = motionPointToEditor(activePath.start, viewport);
   const visual = {
     scale: motionSample.scale,
     rotation: motionSample.rotation,
@@ -86,12 +72,21 @@ export function EntranceWorkspace({
   };
   const end = motionPointToEditor({ x: 0, y: 0 }, viewport);
   const start = startPoint;
-  const control1 = motionPointToEditor(motion.path.control1, viewport);
-  const control2 = motionPointToEditor(motion.path.control2, viewport);
+  const control1 = motionPointToEditor(activePath.control1, viewport);
+  const control2 = motionPointToEditor(activePath.control2, viewport);
+  const rainGhosts = isRain
+    ? ["ghost-a", "ghost-b", "ghost-c"].map((id) => resolveEntrancePath(motion, "entrance-preview", id))
+    : [];
 
   function updatePath(point: "start" | "control1" | "control2" | "end", value: Point2D) {
-    if (point === "end") return;
+    if (point === "end" || isRain) return;
     onMotionChange({ ...motion, path: { ...motion.path, [point]: editorPointToMotion(value, viewport) } });
+  }
+
+  function setPathMode(pathMode: EntrancePathMode) {
+    const next = { ...motion, pathMode };
+    onMotionChange(next);
+    setViewport(frameEntrancePath(pathMode === "rain" ? resolveEntrancePath(next, "entrance-preview", comment.id) : next.path));
   }
 
   return (
@@ -101,7 +96,30 @@ export function EntranceWorkspace({
           <button className="back-button" onClick={onBack}><ArrowLeft size={16} />Back to Field</button>
           <div><span>Shared entrance template</span><strong>Shape how every ordinary post arrives.</strong></div>
         </div>
-        <BezierOverlay start={start} control1={control1} control2={control2} end={end} onChange={updatePath}>
+        <BezierOverlay
+          start={start}
+          control1={control1}
+          control2={control2}
+          end={end}
+          editable={isRain ? [] : ["start", "control1", "control2"]}
+          onChange={updatePath}
+        >
+          {rainGhosts.map((ghost) => {
+            const ghostStart = motionPointToEditor(ghost.start, viewport);
+            return (
+              <div
+                key={`${ghost.start.x}:${ghost.start.y}`}
+                className="motion-preview-card ghost-card"
+                style={{
+                  left: `${ghostStart.x * 100}%`,
+                  top: `${ghostStart.y * 100}%`,
+                  transform: `translate(-50%, -50%) scale(${startVisual.scale * 0.72}) rotate(${startVisual.rotation}rad)`,
+                  filter: `blur(${Math.min(3, startVisual.blur)}px) grayscale(1)`,
+                  opacity: 0.28,
+                }}
+              ><CardPreview comment={comment} style={style} /></div>
+            );
+          })}
           <div className="motion-preview-card ghost-card" style={{
             left: `${startPoint.x * 100}%`,
             top: `${startPoint.y * 100}%`,
@@ -121,7 +139,7 @@ export function EntranceWorkspace({
             {playing ? <Pause size={17} /> : <Play className="play-shift" size={17} />}
           </button>
           <input type="range" min={0} max={1} step={0.001} value={progress} onChange={(event) => { setPlaying(false); setProgress(Number(event.target.value)); }} />
-          <output>{previewTime.toFixed(2)}s</output>
+          <output>{Math.round(previewTime * frameRate)}f</output>
           <button className="secondary-button" onClick={() => { setPlaying(false); setProgress(0); }}><RotateCcw size={15} />Restart</button>
         </div>
       </div>
@@ -129,10 +147,54 @@ export function EntranceWorkspace({
         <PanelSection title="Path framing" meta="Editor view only">
           <Slider label="Vertical range" min={0.35} max={2.4} step={0.05} value={viewport.spanY} display={viewport.spanY.toFixed(2)} onChange={(event) => setViewport({ ...viewport, spanY: Number(event.target.value) })} />
           <Slider label="View center" min={-1} max={1} step={0.025} value={viewport.centerY} display={viewport.centerY.toFixed(2)} onChange={(event) => setViewport({ ...viewport, centerY: Number(event.target.value) })} />
-          <button className="secondary-button wide" onClick={() => setViewport(frameEntrancePath(motion.path))}>Frame full path</button>
+          <button className="secondary-button wide" onClick={() => setViewport(frameEntrancePath(activePath))}>Frame full path</button>
+        </PanelSection>
+        <PanelSection title="Arrival mode" meta="Shared globally">
+          <SelectField label="Path mode" value={motion.pathMode} onChange={(event) => setPathMode(event.target.value as EntrancePathMode)}>
+            <option value="shared">Shared path</option>
+            <option value="rain">Rain · bottom to top</option>
+          </SelectField>
+          {isRain ? (
+            <>
+              <Slider
+                label="Rise distance"
+                min={0.15}
+                max={1.4}
+                step={0.025}
+                value={motion.rainDistance}
+                display={motion.rainDistance.toFixed(2)}
+                onChange={(event) => {
+                  const rainDistance = Number(event.target.value);
+                  const next = { ...motion, rainDistance };
+                  onMotionChange(next);
+                  setViewport(frameEntrancePath(resolveEntrancePath(next, "entrance-preview", comment.id)));
+                }}
+              />
+              <Slider
+                label="Lateral spread"
+                min={0}
+                max={0.6}
+                step={0.01}
+                value={motion.rainLateral}
+                display={motion.rainLateral.toFixed(2)}
+                onChange={(event) => onMotionChange({ ...motion, rainLateral: Number(event.target.value) })}
+              />
+              <p className="panel-note">Each card starts below the frame and pops up to settle with a deterministic random left/right path.</p>
+            </>
+          ) : (
+            <p className="panel-note">Drag the path points to author one shared entrance for every card.</p>
+          )}
         </PanelSection>
         <PanelSection title="Entrance transform" meta="Shared globally">
-          <Slider label="Duration" min={0.1} max={4} step={0.05} value={motion.duration} display={`${motion.duration.toFixed(2)}s`} onChange={(event) => onMotionChange({ ...motion, duration: Number(event.target.value) })} />
+          <Slider
+            label="Duration"
+            min={1}
+            max={Math.round(4 * frameRate)}
+            step={1}
+            value={Math.max(1, Math.round(motion.duration * frameRate))}
+            display={`${Math.max(1, Math.round(motion.duration * frameRate))}f`}
+            onChange={(event) => onMotionChange({ ...motion, duration: Number(event.target.value) / frameRate })}
+          />
           <Slider label="Fade" min={0} max={1} step={0.01} value={motion.fade} onChange={(event) => onMotionChange({ ...motion, fade: Number(event.target.value) })} />
           <Slider label="Blur" min={0} max={20} step={0.25} value={motion.blur} display={`${motion.blur.toFixed(1)}px`} onChange={(event) => onMotionChange({ ...motion, blur: Number(event.target.value) })} />
           <Slider label="Scale from" min={0.2} max={1.5} step={0.01} value={motion.scaleFrom} onChange={(event) => onMotionChange({ ...motion, scaleFrom: Number(event.target.value) })} />

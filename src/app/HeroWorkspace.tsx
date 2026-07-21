@@ -28,6 +28,7 @@ import {
   type Take,
 } from "@comment-field/engine";
 import { CommentScene, type CacheStatus, type CommentSceneHandle, type TransformPatch } from "../renderer/CommentScene";
+import { frameToTime, formatFrame, timeToFrame } from "./KeyframeTimeline";
 import { CardPreview } from "./CardPreview";
 import { BezierOverlay, CurveEditor } from "./MotionEditors";
 import { DEFAULT_ENTRANCE_VIEWPORT, editorPointToMotion, frameEntrancePath, motionPointToEditor } from "./motionViewport";
@@ -168,14 +169,22 @@ export function HeroWorkspace({
         </BezierOverlay>
         <div className="motion-transport">
           <span className="transport-label">Hero preview</span>
-          <input type="range" min={0} max={take.duration} step={1 / composition.frameRate} value={Math.min(time, take.duration)} onChange={(event) => onTimeChange(Number(event.target.value))} />
-          <output>{time.toFixed(2)}s</output>
+          <input type="range" min={0} max={timeToFrame(take.duration, composition.frameRate)} step={1} value={timeToFrame(Math.min(time, take.duration), composition.frameRate)} onChange={(event) => onTimeChange(frameToTime(Number(event.target.value), composition.frameRate))} />
+          <output>{formatFrame(time, composition.frameRate)}</output>
           <button className="secondary-button" onClick={() => onTimeChange(heroStartTime(hero))}><RotateCcw size={15} />To start</button>
         </div>
       </div>
       <aside className="authoring-inspector panel-scroll">
         <PanelSection title="Hero transform" meta={pending ? "Unkeyed pose" : `Key ${poseKeys.findIndex((keyframe) => keyframe.id === selected.id) + 1}/${poseKeys.length}`}>
-          <Slider label="Arrival" min={0} max={Math.max(take.duration, selected.time)} step={1 / composition.frameRate} value={selected.time} display={`${selected.time.toFixed(2)}s`} onChange={(event) => updateSelected({ time: Number(event.target.value) })} />
+          <Slider
+            label="Arrival frame"
+            min={0}
+            max={Math.max(timeToFrame(take.duration, composition.frameRate), timeToFrame(selected.time, composition.frameRate))}
+            step={1}
+            value={timeToFrame(selected.time, composition.frameRate)}
+            display={formatFrame(selected.time, composition.frameRate)}
+            onChange={(event) => updateSelected({ time: frameToTime(Number(event.target.value), composition.frameRate) })}
+          />
           {selectedPose && <>
           <Slider label="Scale" min={0.5} max={3.2} step={0.01} value={selectedPose.transform.scale} onChange={(event) => updatePose({ transform: { ...selectedPose.transform, scale: Number(event.target.value) } })} />
           <Slider label="Rotation" min={-0.8} max={0.8} step={0.01} value={selectedPose.transform.rotation} display={`${(selectedPose.transform.rotation * 57.2958).toFixed(1)}°`} onChange={(event) => updatePose({ transform: { ...selectedPose.transform, rotation: Number(event.target.value) } })} />
