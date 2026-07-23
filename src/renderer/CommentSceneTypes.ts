@@ -11,9 +11,15 @@ export interface SelectOptions {
   ids?: string[] | null;
 }
 
+export interface RenderFrameOptions {
+  transparent?: boolean;
+  /** When set, only these cards are drawn (solo hero / single-card export). */
+  soloCardIds?: string[] | null;
+}
+
 export interface CommentSceneHandle {
   beginExport: (width: number, height: number) => void;
-  renderFrame: (time: number, width: number, height: number, options?: { transparent?: boolean }) => Promise<Blob>;
+  renderFrame: (time: number, width: number, height: number, options?: RenderFrameOptions) => Promise<Blob>;
   renderLiveFrame: (time: number) => void;
   renderPreviewFrame: (time: number, width: number, height: number, quality: number) => Promise<Blob>;
   showPreviewBitmap: (bitmap: ImageBitmap) => void;

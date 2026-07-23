@@ -83,7 +83,8 @@ export function useProjectHistory(initial: Project) {
       }
       return next;
     });
-    if (recorded) queuePromise.then(bump);
+    // Defer history UI epoch so canUndo updates after the project state commit.
+    if (recorded) void Promise.resolve().then(bump);
   }, [bump]);
 
   const mutateProject = useCallback((updater: (draft: Project) => void, options?: { recordHistory?: boolean }) => {
@@ -148,5 +149,3 @@ export function useProjectHistory(initial: Project) {
     historyEpoch,
   };
 }
-
-const voidPromise = Promise.resolve();

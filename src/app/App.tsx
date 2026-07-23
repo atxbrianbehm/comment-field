@@ -9,6 +9,7 @@ import {
   clearHeroPerformance,
   createDefaultProject,
   DEFAULT_ENTRANCE_MOTION,
+  DEFAULT_EXIT_MOTION,
   DEFAULT_COMMENT_TEXT,
   deserializeProject,
   editGestureSample,
@@ -43,6 +44,7 @@ import { useProjectHistory } from "./useProjectHistory";
 const CameraWorkspace = lazy(() => import("./CameraWorkspace").then((module) => ({ default: module.CameraWorkspace })));
 const DesignWorkspace = lazy(() => import("./DesignWorkspace").then((module) => ({ default: module.DesignWorkspace })));
 const EntranceWorkspace = lazy(() => import("./EntranceWorkspace").then((module) => ({ default: module.EntranceWorkspace })));
+const ExitWorkspace = lazy(() => import("./ExitWorkspace").then((module) => ({ default: module.ExitWorkspace })));
 const HeroWorkspace = lazy(() => import("./HeroWorkspace").then((module) => ({ default: module.HeroWorkspace })));
 const HelpOverlay = lazy(() => import("./HelpOverlay").then((module) => ({ default: module.HelpOverlay })));
 
@@ -80,7 +82,7 @@ export function App() {
   const [selectedGestureIndex, setSelectedGestureIndex] = useState<number | null>(null);
   const [mode, setMode] = useState<InteractionMode>("select");
   const [workspace, setWorkspace] = useState<"field" | "design" | "animate">("field");
-  const [animateTab, setAnimateTab] = useState<"entrance" | "camera" | "hero">("entrance");
+  const [animateTab, setAnimateTab] = useState<"entrance" | "exit" | "camera" | "hero">("entrance");
   const [fieldView, setFieldView] = useState<"camera" | "overview">("camera");
   const [rightTab, setRightTab] = useState<"layout" | "build" | "hero">("layout");
   const [autoKey, setAutoKey] = useState(false);
@@ -163,7 +165,8 @@ export function App() {
   const {
     importComments, loadCommentFile, scatter, updateBuild, randomizeBuild, completeGesture, transformCard, transformCards,
     switchComposition, addProtectedRegion, setHero, removeHero, bakeReflow, createTake, fitFieldToComments,
-    alignCameraToHero, deleteTake, saveJson, loadJson, loadBackground, exportFrames, verifyDeterministicFrame,
+    alignCameraToHero, deleteTake, saveJson, loadJson, loadBackground, exportFrames, exportHeroStill,
+    verifyDeterministicFrame,
   } = useAuthoringActions({
     project, composition, take, takes, duration, time, commentSource, selectedPlacement, selectedComment,
     exportScale, exportProgress, sceneRef, mutateProject, mutateComposition, mutateTake, pausePlayback,
@@ -254,6 +257,18 @@ export function App() {
       const mod = event.ctrlKey || event.metaKey;
       if (!mod) return;
       const key = event.key.toLowerCase();
+      if (key === "a") {
+        event.preventDefault();
+        const ids = composition.cards.map((card) => card.cardId);
+        if (!ids.length) {
+          setNotice("No posts to select");
+          return;
+        }
+        setSelectedCardIds(ids);
+        setSelectedCardId(ids[ids.length - 1] ?? null);
+        setNotice(`Selected all ${ids.length} posts`);
+        return;
+      }
       if (key === "z" && !event.shiftKey) {
         event.preventDefault();
         handleUndo();
@@ -343,19 +358,29 @@ export function App() {
         setWorkspace={setWorkspace} setAnimateTab={setAnimateTab} setCacheStatus={setCacheStatus}
         mutateProject={mutateProject} mutateComposition={mutateComposition} mutateTake={mutateTake}
         importComments={importComments} loadCommentFile={loadCommentFile} loadBackground={loadBackground}
-        switchComposition={switchComposition} changeTakeDuration={changeTakeDuration} clearPreviewCache={clearPreviewCache}
+        switchComposition={switchComposition} changeTakeDuration={changeTakeDuration} onTimeChange={scrubTo} clearPreviewCache={clearPreviewCache}
         pausePlayback={pausePlayback} beginManipulation={beginManipulation} endManipulation={endManipulation} transformCard={transformCard} transformCards={transformCards}
         completeGesture={(samples) => { completeGesture(samples); setSelectedGestureIndex(samples.length ? 0 : null); }}
         updateGestureSample={updateGestureSample} scatter={scatter} fitFieldToComments={fitFieldToComments}
         addProtectedRegion={addProtectedRegion} removeHero={removeHero} setHero={setHero} updateBuild={updateBuild}
         randomizeBuild={randomizeBuild} alignCameraToHero={alignCameraToHero} bakeReflow={bakeReflow}
+        onExportHeroStill={() => { void exportHeroStill(); }}
       />}
       <Suspense fallback={<main className="loading-state">Loading workspace…</main>}>
-      {workspace === "design" && <DesignWorkspace comment={representativeComment} style={project.cardStyle} onStyleChange={(key, value) => mutateProject((draft) => { Object.assign(draft.cardStyle, { [key]: value }); })} onBack={() => setWorkspace("field")} />}
+      {workspace === "design" && <DesignWorkspace
+        comment={representativeComment}
+        style={project.cardStyle}
+        renderSettings={project.renderSettings}
+        onStyleChange={(key, value) => mutateProject((draft) => { Object.assign(draft.cardStyle, { [key]: value }); })}
+        onSceneShadowChange={(key, value) => mutateProject((draft) => { Object.assign(draft.renderSettings.sceneShadow, { [key]: value }); })}
+        onCardLightingChange={(key, value) => mutateProject((draft) => { Object.assign(draft.renderSettings.cardLighting, { [key]: value }); })}
+        onBack={() => setWorkspace("field")}
+      />}
       {workspace === "animate" && (
         <div className="animate-shell">
           <div className="animate-tabs">
             <button className={animateTab === "entrance" ? "is-active" : ""} onClick={() => setAnimateTab("entrance")}>Shared entrance</button>
+            <button className={animateTab === "exit" ? "is-active" : ""} onClick={() => setAnimateTab("exit")}>Shared exit</button>
             <button className={animateTab === "camera" ? "is-active" : ""} onClick={() => setAnimateTab("camera")}>Camera</button>
             <button className={animateTab === "hero" ? "is-active" : ""} onClick={() => setAnimateTab("hero")} disabled={!take.hero}>Hero path</button>
           </div>
@@ -377,6 +402,20 @@ export function App() {
                 })}
                 onBack={() => setWorkspace("field")}
               />
+            : animateTab === "exit"
+              ? <ExitWorkspace
+                  comment={representativeComment}
+                  style={project.cardStyle}
+                  population={take.population}
+                  frameRate={composition.frameRate}
+                  onPopulationChange={(population) => mutateTake((draft) => { draft.population = population; })}
+                  onReset={() => mutateTake((draft) => {
+                    draft.population.exitMotion = structuredClone(DEFAULT_EXIT_MOTION);
+                    draft.population.exitDuration = 0.45;
+                    draft.population.exitDistance = 0.32;
+                  })}
+                  onBack={() => setWorkspace("field")}
+                />
             : animateTab === "camera"
               ? <CameraWorkspace
                   composition={composition}
@@ -395,7 +434,7 @@ export function App() {
                   autoKey={autoKey}
                   onAutoKeyChange={setAutoKey}
                 />
-              : <HeroWorkspace composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} style={project.cardStyle} renderSettings={project.renderSettings} time={time} selectedCardId={take.hero?.cardId ?? selectedCardId} sceneRef={sceneRef} onTimeChange={scrubTo} onHeroChange={(hero) => mutateTake((draft) => { draft.hero = hero; })} onRemoveHero={removeHero} onBakeReflow={bakeReflow} onBack={() => setWorkspace("field")} onCacheStatus={setCacheStatus} autoKey={autoKey} />}
+              : <HeroWorkspace composition={composition} take={take} entranceMotion={project.entranceMotion} comments={project.comments} style={project.cardStyle} renderSettings={project.renderSettings} time={time} selectedCardId={take.hero?.cardId ?? selectedCardId} sceneRef={sceneRef} onTimeChange={scrubTo} onHeroChange={(hero) => mutateTake((draft) => { draft.hero = hero; })} onRemoveHero={removeHero} onBakeReflow={bakeReflow} onBack={() => setWorkspace("field")} onCacheStatus={setCacheStatus} autoKey={autoKey} onExportHeroStill={() => { void exportHeroStill(); }} />}
         </div>
       )}
       </Suspense>

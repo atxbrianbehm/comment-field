@@ -24,6 +24,7 @@ import {
   type HeroKeyframe,
   type HeroPerformance,
   type Point2D,
+  type RenderSettings,
   type Take,
 } from "@comment-field/engine";
 import { CommentScene, type CacheStatus, type CommentSceneHandle, type TransformPatch } from "../renderer/CommentScene";
@@ -39,12 +40,18 @@ function styleToggle(label: string, checked: boolean, onChange: (value: boolean)
 export function DesignWorkspace({
   comment,
   style,
+  renderSettings,
   onStyleChange,
+  onSceneShadowChange,
+  onCardLightingChange,
   onBack,
 }: {
   comment: CommentRecord;
   style: CardStyle;
+  renderSettings: RenderSettings;
   onStyleChange: <K extends keyof CardStyle>(key: K, value: CardStyle[K]) => void;
+  onSceneShadowChange: <K extends keyof RenderSettings["sceneShadow"]>(key: K, value: RenderSettings["sceneShadow"][K]) => void;
+  onCardLightingChange: <K extends keyof RenderSettings["cardLighting"]>(key: K, value: RenderSettings["cardLighting"][K]) => void;
   onBack: () => void;
 }) {
   return (
@@ -55,7 +62,7 @@ export function DesignWorkspace({
           <div><span>Shared card template</span><strong>Design one post. Update every post.</strong></div>
         </div>
         <div className="design-preview-surface">
-          <CardPreview comment={comment} style={style} className="design-card-preview" />
+          <CardPreview comment={comment} style={style} renderSettings={renderSettings} className="design-card-preview" />
           <p>Representative content · {comment.handle || "message-only post"}</p>
         </div>
       </div>
@@ -67,8 +74,25 @@ export function DesignWorkspace({
           <Slider label="Stroke width" min={0} max={12} step={0.5} value={style.strokeWidth} display={`${style.strokeWidth}px`} onChange={(event) => onStyleChange("strokeWidth", Number(event.target.value))} />
           <Field label="Stroke color" type="color" value={style.strokeColor} onChange={(event) => onStyleChange("strokeColor", event.target.value)} />
           <Slider label="Corner radius" min={0} max={48} step={1} value={style.cornerRadius} display={`${style.cornerRadius}px`} onChange={(event) => onStyleChange("cornerRadius", Number(event.target.value))} />
-          <Slider label="Shadow" min={0} max={0.6} step={0.01} value={style.shadow} onChange={(event) => onStyleChange("shadow", Number(event.target.value))} />
+          <Slider label="Texture shadow" min={0} max={0.6} step={0.01} value={style.shadow} onChange={(event) => onStyleChange("shadow", Number(event.target.value))} />
           <Slider label="Padding" min={12} max={40} step={1} value={style.padding} display={`${style.padding}px`} onChange={(event) => onStyleChange("padding", Number(event.target.value))} />
+        </PanelSection>
+        <PanelSection title="Scene depth" meta="Live WebGPU">
+          {styleToggle("Soft shadow", renderSettings.sceneShadow.enabled, (value) => onSceneShadowChange("enabled", value))}
+          {renderSettings.sceneShadow.enabled && <>
+            <Field label="Shadow color" type="color" value={renderSettings.sceneShadow.color} onChange={(event) => onSceneShadowChange("color", event.target.value)} />
+            <Slider label="Opacity" min={0} max={0.8} step={0.01} value={renderSettings.sceneShadow.opacity} display={`${Math.round(renderSettings.sceneShadow.opacity * 100)}%`} onChange={(event) => onSceneShadowChange("opacity", Number(event.target.value))} />
+            <Slider label="Softness" min={0} max={1} step={0.01} value={renderSettings.sceneShadow.softness} display={`${Math.round(renderSettings.sceneShadow.softness * 100)}%`} onChange={(event) => onSceneShadowChange("softness", Number(event.target.value))} />
+            <Slider label="Distance" min={0} max={0.06} step={0.001} value={renderSettings.sceneShadow.distance} display={`${(renderSettings.sceneShadow.distance * 100).toFixed(1)}%`} onChange={(event) => onSceneShadowChange("distance", Number(event.target.value))} />
+            <Slider label="Shadow angle" min={-180} max={180} step={1} value={renderSettings.sceneShadow.angle} display={`${renderSettings.sceneShadow.angle.toFixed(0)}°`} onChange={(event) => onSceneShadowChange("angle", Number(event.target.value))} />
+          </>}
+          {styleToggle("Card lighting", renderSettings.cardLighting.enabled, (value) => onCardLightingChange("enabled", value))}
+          {renderSettings.cardLighting.enabled && <>
+            <Slider label="Ambient" min={0.7} max={1.2} step={0.01} value={renderSettings.cardLighting.ambient} display={`${renderSettings.cardLighting.ambient.toFixed(2)}×`} onChange={(event) => onCardLightingChange("ambient", Number(event.target.value))} />
+            <Slider label="Key intensity" min={0} max={0.5} step={0.01} value={renderSettings.cardLighting.intensity} display={`${Math.round(renderSettings.cardLighting.intensity * 100)}%`} onChange={(event) => onCardLightingChange("intensity", Number(event.target.value))} />
+            <Slider label="Light angle" min={-180} max={180} step={1} value={renderSettings.cardLighting.angle} display={`${renderSettings.cardLighting.angle.toFixed(0)}°`} onChange={(event) => onCardLightingChange("angle", Number(event.target.value))} />
+            <Slider label="Edge light" min={0} max={0.3} step={0.01} value={renderSettings.cardLighting.edge} display={`${Math.round(renderSettings.cardLighting.edge * 100)}%`} onChange={(event) => onCardLightingChange("edge", Number(event.target.value))} />
+          </>}
         </PanelSection>
         <PanelSection title="Content visibility">
           {styleToggle("Avatar", style.showAvatar, (value) => onStyleChange("showAvatar", value))}

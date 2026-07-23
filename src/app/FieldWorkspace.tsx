@@ -1,12 +1,13 @@
 ﻿import type { Dispatch, RefObject, SetStateAction } from "react";
 import {
-  Camera, CircleDot, Clapperboard, FileUp, Heart, ImagePlus, Layers3, Lock, MousePointer2,
+  Camera, CircleDot, Clapperboard, Download, FileUp, Heart, ImagePlus, Layers3, Lock, MousePointer2,
   Move3d, Palette, RefreshCw, Shield, Sparkles, Trash2, Unlock, WandSparkles,
 } from "lucide-react";
 import { useState } from "react";
 import {
   alignCardPlacements,
   distributeCardPlacements,
+  heroEndTime,
   regenerateComposition,
   type AlignMode,
   type BuildOrder,
@@ -30,7 +31,7 @@ function styleToggle(label: string, checked: boolean, onChange: (value: boolean)
 }
 
 type Workspace = "field" | "design" | "animate";
-type AnimateTab = "entrance" | "camera" | "hero";
+type AnimateTab = "entrance" | "exit" | "camera" | "hero";
 type FieldView = "camera" | "overview";
 type RightTab = "layout" | "build" | "hero";
 
@@ -74,6 +75,7 @@ interface FieldWorkspaceProps {
   loadBackground: (file: File) => void;
   switchComposition: (id: string) => void;
   changeTakeDuration: (value: number) => void;
+  onTimeChange: (value: number) => void;
   clearPreviewCache: (reason?: string, state?: PreviewCacheStatus["state"]) => void;
   pausePlayback: () => void;
   beginManipulation: () => void;
@@ -91,6 +93,8 @@ interface FieldWorkspaceProps {
   randomizeBuild: () => void;
   alignCameraToHero: () => void;
   bakeReflow: () => void;
+  /** Download a flat PNG of the assigned hero card. */
+  onExportHeroStill?: () => void;
 }
 
 export function FieldWorkspace(props: FieldWorkspaceProps) {
@@ -100,9 +104,9 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
     selectedPlacement, selectedComment, mode, fieldView, rightTab, cacheStatus, previewStatus, previewLabel,
     previewMemory, sceneRef, setCommentSource, setSelectedCardId, onSelectCard, setSelectedGestureIndex, setMode, setFieldView, setRightTab, setWorkspace,
     setAnimateTab, setCacheStatus, mutateProject, mutateComposition, mutateTake, importComments, loadCommentFile,
-    loadBackground, switchComposition, changeTakeDuration, clearPreviewCache, pausePlayback, beginManipulation, endManipulation,
+    loadBackground, switchComposition, changeTakeDuration, onTimeChange, clearPreviewCache, pausePlayback, beginManipulation, endManipulation,
     transformCard, transformCards, completeGesture, updateGestureSample, scatter, fitFieldToComments, addProtectedRegion, removeHero, setHero, updateBuild,
-    randomizeBuild, alignCameraToHero, bakeReflow,
+    randomizeBuild, alignCameraToHero, bakeReflow, onExportHeroStill,
   } = props;
 
   function applyPlacementMap(map: Record<string, { x: number; y: number }>) {
@@ -118,6 +122,12 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
     applyPlacementMap(distributeCardPlacements(composition.cards, selectedCardIds, axis));
   }
   const multiScreen = composition.fieldBounds.width > 1 || composition.fieldBounds.height > 1;
+  const finalBurstEntranceDuration = take.population.postHeroEntranceDuration ?? (take.entranceOverride ?? project.entranceMotion).duration;
+  const finalBurstLifeMin = take.population.postHeroLifeMin ?? take.population.lifeMin;
+  const finalBurstLifeMax = take.population.postHeroLifeMax ?? take.population.lifeMax;
+  const finalBurstExitDuration = take.population.postHeroExitDuration ?? take.population.exitDuration;
+  const finalBurstEasing = take.population.postHeroBurstEasing ?? { x1: 0, y1: 0, x2: 1, y2: 1 };
+  const finalBurstStartTime = take.hero ? heroEndTime(take.hero) : (take.population.postHeroBurstStartTime ?? Math.max(0, duration - 2));
 
   function applyFieldBounds(width: number, height: number) {
     mutateProject((draft) => {
@@ -196,10 +206,10 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
       <section className="workspace">
         <div className="viewer-toolbar">
           <div className="viewer-meta"><strong>{composition.name}</strong><span>{multiScreen ? `${composition.fieldBounds.width}×${composition.fieldBounds.height} field · ` : ""}{composition.frameRate} fps</span></div>
-          {multiScreen && <div className="view-switcher">
+          <div className="view-switcher">
             <button className={fieldView === "camera" ? "is-active" : ""} onClick={() => setFieldView("camera")}><Camera size={14} />Camera</button>
             <button className={fieldView === "overview" ? "is-active" : ""} onClick={() => { setFieldView("overview"); requestAnimationFrame(() => sceneRef.current?.fitField()); }}><Layers3 size={14} />Overview</button>
-          </div>}
+          </div>
           <details className={`cache-badge ${previewStatus.state}`}>
             <summary>
               <span>Assets {cacheStatus.state === "ready" ? "Ready" : "Rebuilding"} · {cacheStatus.ready}/{cacheStatus.total}</span>
@@ -239,7 +249,7 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             selectedCardIds={selectedCardIds}
             selectedGestureIndex={selectedGestureIndex}
             mode={mode}
-            viewMode={playing || !multiScreen ? "camera" : fieldView}
+            viewMode={playing ? "camera" : fieldView}
             showTransformHandles
             showGesturePath={rightTab === "build"}
             onSelect={onSelectCard}
@@ -291,15 +301,11 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             <Slider label="Depth near" min={-1.5} max={1.5} step={0.05} value={composition.scatter.depthMin} onChange={(event) => mutateComposition((draft) => { draft.scatter.depthMin = Number(event.target.value); })} />
             <Slider label="Depth far" min={-1.5} max={1.5} step={0.05} value={composition.scatter.depthMax} onChange={(event) => mutateComposition((draft) => { draft.scatter.depthMax = Number(event.target.value); })} />
             <button className="primary-button wide" onClick={scatter}><WandSparkles size={16} />Generate field</button>
-            {multiScreen && (
-              <>
-                <div className="button-pair">
-                  <button className="secondary-button" onClick={fitFieldToComments}>Fit to comments</button>
-                  <button className="secondary-button" onClick={() => { setFieldView("overview"); requestAnimationFrame(() => sceneRef.current?.fitField()); }}>Fit field</button>
-                </div>
-                <button className="secondary-button wide" onClick={() => setFieldView("camera")}><Camera size={15} />Frame camera</button>
-              </>
-            )}
+            <div className="button-pair">
+              <button className="secondary-button" onClick={fitFieldToComments}>Fit to comments</button>
+              <button className="secondary-button" onClick={() => { setFieldView("overview"); requestAnimationFrame(() => sceneRef.current?.fitField()); }}>Fit field</button>
+            </div>
+            <button className="secondary-button wide" onClick={() => setFieldView("camera")}><Camera size={15} />Frame camera</button>
           </PanelSection>
           <PanelSection title="Protected regions" meta={`${composition.protectedRegions.length}`}>
             <button className="secondary-button wide" onClick={addProtectedRegion}><Shield size={16} />Add central region</button>
@@ -308,10 +314,20 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             {selectedCardIds.length > 0 && (
               <>
                 <p className="panel-note">
-                  {selectedCardIds.length} selected. Click empty space or press Esc to clear.
-                  {selectedCardIds.length > 1 ? " Drag any selected post to move the group. Alt-drag pans the overview." : ""}
+                  {selectedCardIds.length} selected. Esc clears · Ctrl/Cmd+A selects all.
+                  {selectedCardIds.length > 1 ? " Drag any selected post to move the group. Alt-drag pans overview." : ""}
                 </p>
                 <button type="button" className="secondary-button wide" onClick={() => onSelectCard(null, { ids: [] })}>Clear selection</button>
+                <button
+                  type="button"
+                  className="secondary-button wide"
+                  onClick={() => {
+                    const ids = composition.cards.map((card) => card.cardId);
+                    onSelectCard(ids[ids.length - 1] ?? null, { ids });
+                  }}
+                >
+                  Select all posts
+                </button>
               </>
             )}
             {selectedCardIds.length > 1 && (
@@ -367,6 +383,79 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
           <button className="secondary-button wide" onClick={randomizeBuild}><Sparkles size={16} />Randomize triggers</button>
           <button className={`record-button wide ${mode === "record" ? "is-recording" : ""}`} onClick={() => { setMode(mode === "record" ? "select" : "record"); pausePlayback(); }}><CircleDot size={16} />{mode === "record" ? "Recording: draw in viewer" : "Record mouse build"}</button>
         </PanelSection>
+        <PanelSection title="Tweet population" meta={take.population.enabled ? "Living field" : "Single build"}>
+          <p className="panel-explainer">Give each post a deterministic life: enter, drift, leave, wait, and return. The same seed always produces the same performance.</p>
+          {styleToggle("Continuous field", take.population.enabled, (enabled) => mutateTake((draft) => { draft.population.enabled = enabled; }))}
+          <button className="accent-button wide" onClick={() => mutateTake((draft) => {
+            Object.assign(draft.population, {
+              enabled: true,
+              initialPopulation: 0.35,
+              lifeMin: 1.8,
+              lifeMax: 4.5,
+              gapMin: 0.45,
+              gapMax: 1.35,
+              exitDuration: 0.45,
+              wanderAmount: 0.025,
+              scaleVariation: 0.04,
+              depthVariation: 1.2,
+              exitDistance: 0.32,
+              postHeroBurst: 0.9,
+              postHeroBurstDuration: 0.5,
+              postHeroBurstEasing: { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 },
+              postHeroEntranceDuration: 1 / 3,
+              postHeroLifeMin: 0.75,
+              postHeroLifeMax: 1.5,
+              postHeroExitDuration: 1 / 3,
+            });
+          })}><Sparkles size={16} />Apply client-note preset</button>
+          <button className="secondary-button wide" onClick={() => { setWorkspace("animate"); setAnimateTab("exit"); }}><Clapperboard size={16} />Edit out animation</button>
+          {take.population.enabled && <>
+            <Field label="Population seed" value={take.population.seed} onChange={(event) => mutateTake((draft) => { draft.population.seed = event.target.value; })} />
+            <Slider label="Visible at start" min={0} max={1} step={0.05} value={take.population.initialPopulation} display={`${Math.round(take.population.initialPopulation * 100)}%`} onChange={(event) => mutateTake((draft) => { draft.population.initialPopulation = Number(event.target.value); })} />
+            <Slider label="Shortest life" min={6} max={Math.round(8 * composition.frameRate)} step={1} value={Math.round(take.population.lifeMin * composition.frameRate)} display={`${Math.round(take.population.lifeMin * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.lifeMin = Number(event.target.value) / composition.frameRate; })} />
+            <Slider label="Longest life" min={12} max={Math.round(12 * composition.frameRate)} step={1} value={Math.round(take.population.lifeMax * composition.frameRate)} display={`${Math.round(take.population.lifeMax * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.lifeMax = Number(event.target.value) / composition.frameRate; })} />
+            <Slider label="Shortest gap" min={0} max={Math.round(4 * composition.frameRate)} step={1} value={Math.round(take.population.gapMin * composition.frameRate)} display={`${Math.round(take.population.gapMin * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.gapMin = Number(event.target.value) / composition.frameRate; })} />
+            <Slider label="Longest gap" min={0} max={Math.round(6 * composition.frameRate)} step={1} value={Math.round(take.population.gapMax * composition.frameRate)} display={`${Math.round(take.population.gapMax * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.gapMax = Number(event.target.value) / composition.frameRate; })} />
+            <Slider label="Exit duration" min={3} max={Math.round(2 * composition.frameRate)} step={1} value={Math.round(take.population.exitDuration * composition.frameRate)} display={`${Math.round(take.population.exitDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.exitDuration = Number(event.target.value) / composition.frameRate; })} />
+            <Slider label="Wander" min={0} max={0.12} step={0.0025} value={take.population.wanderAmount} display={`${(take.population.wanderAmount * 100).toFixed(1)}%`} onChange={(event) => mutateTake((draft) => { draft.population.wanderAmount = Number(event.target.value); })} />
+            <Slider label="Card size jitter" min={0} max={0.6} step={0.005} value={take.population.scaleVariation} display={`${Math.round(take.population.scaleVariation * 100)}%`} onChange={(event) => mutateTake((draft) => { draft.population.scaleVariation = Number(event.target.value); })} />
+            <Slider label="Depth / apparent size" min={0} max={2.5} step={0.05} value={take.population.depthVariation} display={take.population.depthVariation.toFixed(2)} onChange={(event) => mutateTake((draft) => { draft.population.depthVariation = Number(event.target.value); })} />
+            <p className="panel-note">Cards stay close to the shared template size. Near/far Z now creates most of the apparent size difference.</p>
+            <Slider label="Exit distance" min={0} max={1.2} step={0.025} value={take.population.exitDistance} display={take.population.exitDistance.toFixed(2)} onChange={(event) => mutateTake((draft) => { draft.population.exitDistance = Number(event.target.value); })} />
+          </>}
+        </PanelSection>
+        <PanelSection title="Final burst" meta={take.hero ? `Hero end · ${Math.round(finalBurstStartTime * composition.frameRate)}f` : `Manual · ${Math.round(finalBurstStartTime * composition.frameRate)}f`}>
+          <p className="panel-explainer">Give the ending its own denser, faster performance. The bias curve redistributes arrivals inside the selected window.</p>
+          <button className="accent-button wide" onClick={() => mutateTake((draft) => {
+            Object.assign(draft.population, {
+              enabled: true,
+              postHeroBurst: 0.95,
+              postHeroBurstStartTime: Math.max(0, draft.duration - 2),
+              postHeroBurstDuration: 10 / composition.frameRate,
+              postHeroBurstEasing: { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 },
+              postHeroEntranceDuration: 8 / composition.frameRate,
+              postHeroLifeMin: 18 / composition.frameRate,
+              postHeroLifeMax: 36 / composition.frameRate,
+              postHeroExitDuration: 8 / composition.frameRate,
+            });
+          })}><Sparkles size={16} />Apply fast-ending preset</button>
+          <button className="secondary-button wide" onClick={() => { pausePlayback(); onTimeChange(Math.max(0, finalBurstStartTime - 0.5)); }}><Clapperboard size={16} />Cue final burst</button>
+          <Slider label="Burst start" min={0} max={Math.round(duration * composition.frameRate)} step={1} value={Math.round(finalBurstStartTime * composition.frameRate)} display={`${Math.round(finalBurstStartTime * composition.frameRate)}f`} disabled={Boolean(take.hero)} onChange={(event) => mutateTake((draft) => { draft.population.postHeroBurstStartTime = Number(event.target.value) / composition.frameRate; })} />
+          <Slider label="Burst amount" min={0} max={1} step={0.05} value={take.population.postHeroBurst} display={`${Math.round(take.population.postHeroBurst * 100)}%`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroBurst = Number(event.target.value); })} />
+          <Slider label="Arrival window" min={1} max={Math.round(4 * composition.frameRate)} step={1} value={Math.round(take.population.postHeroBurstDuration * composition.frameRate)} display={`${Math.round(take.population.postHeroBurstDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroBurstDuration = Number(event.target.value) / composition.frameRate; })} />
+          <Slider label="Build duration" min={2} max={Math.round(2 * composition.frameRate)} step={1} value={Math.round(finalBurstEntranceDuration * composition.frameRate)} display={`${Math.round(finalBurstEntranceDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroEntranceDuration = Number(event.target.value) / composition.frameRate; })} />
+          <Slider label="Shortest burst life" min={4} max={Math.round(6 * composition.frameRate)} step={1} value={Math.round(finalBurstLifeMin * composition.frameRate)} display={`${Math.round(finalBurstLifeMin * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroLifeMin = Math.min(Number(event.target.value) / composition.frameRate, draft.population.postHeroLifeMax ?? draft.population.lifeMax); })} />
+          <Slider label="Longest burst life" min={6} max={Math.round(8 * composition.frameRate)} step={1} value={Math.round(finalBurstLifeMax * composition.frameRate)} display={`${Math.round(finalBurstLifeMax * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroLifeMax = Math.max(Number(event.target.value) / composition.frameRate, draft.population.postHeroLifeMin ?? draft.population.lifeMin); })} />
+          <Slider label="Burst exit duration" min={2} max={Math.round(2 * composition.frameRate)} step={1} value={Math.round(finalBurstExitDuration * composition.frameRate)} display={`${Math.round(finalBurstExitDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroExitDuration = Number(event.target.value) / composition.frameRate; })} />
+          <div className="population-curve-label"><strong>Arrival bias</strong><span>Weighted delay</span></div>
+          <CurveEditor curve={finalBurstEasing} onChange={(postHeroBurstEasing) => mutateTake((draft) => { draft.population.postHeroBurstEasing = postHeroBurstEasing; })} />
+          <div className="curve-presets">
+            <button onClick={() => mutateTake((draft) => { draft.population.postHeroBurstEasing = { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 }; })}>Front-load</button>
+            <button onClick={() => mutateTake((draft) => { draft.population.postHeroBurstEasing = { x1: 0, y1: 0, x2: 1, y2: 1 }; })}>Even</button>
+            <button onClick={() => mutateTake((draft) => { draft.population.postHeroBurstEasing = { x1: 0.15, y1: 0.75, x2: 0.45, y2: 1 }; })}>Back-load</button>
+          </div>
+          <p className="panel-note">{take.hero ? "The burst follows the hero’s final key automatically." : "No hero is assigned, so the burst uses the manual start frame above."} Cue it, then play through the arrival window to judge the curve.</p>
+        </PanelSection>
         {take.gestureSamples.length > 0 && <PanelSection title="Recorded path" meta={selectedGestureIndex === null ? `${take.gestureSamples.length} points` : `Point ${selectedGestureIndex + 1}/${take.gestureSamples.length}`}>
           <p className="panel-explainer">Tap a point in the viewer or its diamond in the timeline, then art-direct its screen position and arrival time.</p>
           {selectedGestureIndex === null ? <button className="secondary-button wide" onClick={() => setSelectedGestureIndex(0)}>Select first point</button> : (() => {
@@ -392,7 +481,7 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
           })()}
         </PanelSection>}
         <PanelSection title="Take notes"><textarea className="take-notes" value={take.notes ?? ""} placeholder="Timing notes, alternates, review flags…" onChange={(event) => mutateTake((draft) => { draft.notes = event.target.value; })} /></PanelSection></>}
-        {rightTab === "build" && <PanelSection title="Opacity curve" meta="Shared globally">
+        {rightTab === "build" && <PanelSection title="In opacity curve" meta="Entrance opacity only">
           <p className="panel-explainer">Shape the fade independently from position, scale, rotation, depth, and blur.</p>
           <Slider label="Fade amount" min={0} max={1} step={0.01} value={project.entranceMotion.fade} display={`${Math.round(project.entranceMotion.fade * 100)}%`} onChange={(event) => mutateProject((draft) => { draft.entranceMotion.fade = Number(event.target.value); })} />
           <CurveEditor curve={project.entranceMotion.opacityEasing} onChange={(opacityEasing) => mutateProject((draft) => { draft.entranceMotion.opacityEasing = opacityEasing; })} />
@@ -412,15 +501,34 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             <Slider label="Strength" min={0.25} max={2} step={0.05} value={project.renderSettings.motionBlur.strength} display={`${project.renderSettings.motionBlur.strength.toFixed(2)}×`} onChange={(event) => mutateProject((draft) => { draft.renderSettings.motionBlur.strength = Number(event.target.value); })} />
           </>}
         </PanelSection>}
-        {rightTab === "hero" && <PanelSection title="Hero transition" meta={take.hero ? project.comments.find((item) => item.id === take.hero?.cardId)?.handle : "Not set"}>
-          {!take.hero ? <div className="empty-hero"><Heart size={24} /><p>Select an eligible post, then choose <strong>Make hero</strong>.</p></div> : <>
-            <p className="selected-copy">The active hero is rendered above every ordinary post.</p>
-            <button className="accent-button wide" onClick={() => { setWorkspace("animate"); setAnimateTab("hero"); }}><Clapperboard size={16} />Edit hero path</button>
-            <button className="secondary-button wide" onClick={alignCameraToHero}><Camera size={16} />Settle camera on hero</button>
-            <button className="secondary-button wide" onClick={bakeReflow}><Move3d size={16} />Generate & edit reflow</button>
-            <button className="danger-button wide" onClick={removeHero}><Trash2 size={16} />Remove hero</button>
-          </>}
-        </PanelSection>}
+        {rightTab === "hero" && (
+          <PanelSection title="Hero transition" meta={take.hero ? project.comments.find((item) => item.id === take.hero?.cardId)?.handle : "Not set"}>
+            {!take.hero ? (
+              <div className="empty-hero"><Heart size={24} /><p>Select an eligible post, then choose <strong>Make hero</strong>.</p></div>
+            ) : (
+              <>
+                <p className="selected-copy">The active hero is rendered above every ordinary post.</p>
+                <button className="accent-button wide" onClick={() => { setWorkspace("animate"); setAnimateTab("hero"); }}>
+                  <Clapperboard size={16} />Edit hero path
+                </button>
+                <button className="secondary-button wide" onClick={alignCameraToHero}>
+                  <Camera size={16} />Settle camera on hero
+                </button>
+                <button className="secondary-button wide" onClick={bakeReflow}>
+                  <Move3d size={16} />Generate & edit reflow
+                </button>
+                {onExportHeroStill && (
+                  <button type="button" className="secondary-button wide" onClick={onExportHeroStill}>
+                    <Download size={16} />Export hero still
+                  </button>
+                )}
+                <button className="danger-button wide" onClick={removeHero}>
+                  <Trash2 size={16} />Remove hero
+                </button>
+              </>
+            )}
+          </PanelSection>
+        )}
       </aside>
     </>
   );

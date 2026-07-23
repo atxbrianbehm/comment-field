@@ -199,7 +199,7 @@ export function EntranceWorkspace({
           <Slider label="Blur" min={0} max={20} step={0.25} value={motion.blur} display={`${motion.blur.toFixed(1)}px`} onChange={(event) => onMotionChange({ ...motion, blur: Number(event.target.value) })} />
           <Slider label="Scale from" min={0.2} max={1.5} step={0.01} value={motion.scaleFrom} onChange={(event) => onMotionChange({ ...motion, scaleFrom: Number(event.target.value) })} />
           <Slider label="Rotation offset" min={-0.8} max={0.8} step={0.01} value={motion.rotationOffset} display={`${(motion.rotationOffset * 57.2958).toFixed(1)}°`} onChange={(event) => onMotionChange({ ...motion, rotationOffset: Number(event.target.value) })} />
-          <Slider label="Depth offset" min={-2} max={2} step={0.01} value={motion.depthOffset} onChange={(event) => onMotionChange({ ...motion, depthOffset: Number(event.target.value) })} />
+          <Slider label="Depth offset" min={-8} max={8} step={0.05} value={motion.depthOffset} onChange={(event) => onMotionChange({ ...motion, depthOffset: Number(event.target.value) })} />
         </PanelSection>
         <PanelSection title="Natural settle" meta="Deterministic">
           <Slider label="Spring amount" min={0} max={0.5} step={0.01} value={motion.springAmount} display={`${Math.round(motion.springAmount * 100)}%`} onChange={(event) => onMotionChange({ ...motion, springAmount: Number(event.target.value) })} />
@@ -217,6 +217,14 @@ export function EntranceWorkspace({
             <button onClick={() => onMotionChange({ ...motion, easing: { x1: 0, y1: 0, x2: 1, y2: 1 } })}>Linear</button>
             <button onClick={() => onMotionChange({ ...motion, easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 } })}>Ease out</button>
             <button onClick={() => onMotionChange({ ...motion, easing: { x1: 0.65, y1: 0, x2: 0.35, y2: 1 } })}>Ease in/out</button>
+          </div>
+        </PanelSection>
+        <PanelSection title="In opacity curve" meta="Opacity only">
+          <CurveEditor curve={motion.opacityEasing} onChange={(opacityEasing) => onMotionChange({ ...motion, opacityEasing })} />
+          <div className="curve-presets">
+            <button onClick={() => onMotionChange({ ...motion, opacityEasing: { x1: 0, y1: 0, x2: 1, y2: 1 } })}>Linear</button>
+            <button onClick={() => onMotionChange({ ...motion, opacityEasing: { x1: 0.42, y1: 0, x2: 1, y2: 1 } })}>Ease in</button>
+            <button onClick={() => onMotionChange({ ...motion, opacityEasing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 } })}>Ease out</button>
           </div>
           <button className="secondary-button wide" onClick={() => { onReset(); setViewport(DEFAULT_ENTRANCE_VIEWPORT); }}><RotateCcw size={15} />Reset entrance template</button>
         </PanelSection>

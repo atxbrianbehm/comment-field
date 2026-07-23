@@ -8,7 +8,7 @@ import {
 import type { CommentSceneHandle, InteractionMode, TransformPatch } from "../renderer/CommentScene";
 
 type Workspace = "field" | "design" | "animate";
-type AnimateTab = "entrance" | "camera" | "hero";
+type AnimateTab = "entrance" | "exit" | "camera" | "hero";
 type FieldView = "camera" | "overview";
 type RightTab = "layout" | "build" | "hero";
 
@@ -261,6 +261,7 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
     if (!duplicate) {
       source.duration = 8;
       source.build.seed = `${composition.seed}-build-${siblingCount}`;
+      source.population.seed = `${composition.seed}-population-${siblingCount}`;
       source.gestureSamples = [];
       source.cardTriggers = resolveBuildTriggers(composition.cards, source.build);
       source.entranceOverride = undefined;
@@ -330,11 +331,16 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
     reader.readAsDataURL(file);
   }
 
+  function slugPart(value: string) {
+    return value.replace(/\W+/g, "-").toLowerCase().replace(/^-|-$/g, "") || "clip";
+  }
+
   async function exportFrames() {
     if (!sceneRef.current || exportProgress) { setNotice("Return to Field or Hero view before exporting"); return; }
     const width = Math.round(composition.width * exportScale);
     const height = Math.round(composition.height * exportScale);
     const transparent = Boolean(project.renderSettings.transparentExport);
+    const prefix = `${slugPart(composition.name)}-${slugPart(take.name)}${transparent ? "-alpha" : ""}`;
     try {
       pausePlayback();
       setExportProgress({ frame: 0, total: Math.round(duration * composition.frameRate) });
@@ -347,7 +353,7 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
           height,
           frameRate: composition.frameRate,
           duration,
-          prefix: `${composition.name.replace(/\W+/g, "-").toLowerCase()}-${take.name.replace(/\W+/g, "-").toLowerCase()}${transparent ? "-alpha" : ""}`,
+          prefix,
         },
         (progress) => {
           if (progress.frame === progress.total || progress.frame % 5 === 0) setExportProgress(progress);
@@ -357,6 +363,25 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
       setNotice(transparent ? "Transparent PNG sequence exported" : "PNG sequence exported");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Export failed"); }
     finally { sceneRef.current?.endExport(); setExportProgress(null); }
+  }
+
+  /** Flat PNG of the assigned hero card (or selected hero-eligible post). */
+  async function exportHeroStill() {
+    const comment = take.hero
+      ? project.comments.find((item) => item.id === take.hero?.cardId) ?? null
+      : selectedComment?.heroEligible ? selectedComment : null;
+    if (!comment) { setNotice("Assign a hero (or select a hero-eligible post) first"); return; }
+    try {
+      const { renderCardCanvas } = await import("@comment-field/webgpu-runtime");
+      const canvas = renderCardCanvas(comment, project.cardStyle, 2);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("Card PNG failed"))), "image/png");
+      });
+      downloadBlob(blob, `hero-${slugPart(comment.handle || comment.username || comment.id)}.png`);
+      setNotice(`Exported hero still · ${comment.handle || comment.username}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Hero still export failed");
+    }
   }
 
   async function verifyDeterministicFrame() {
@@ -382,6 +407,7 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
   return {
     importComments, loadCommentFile, scatter, updateBuild, randomizeBuild, completeGesture, transformCard, transformCards,
     switchComposition, addProtectedRegion, setHero, removeHero, bakeReflow, createTake, fitFieldToComments,
-    alignCameraToHero, deleteTake, saveJson, loadJson, loadBackground, exportFrames, verifyDeterministicFrame,
+    alignCameraToHero, deleteTake, saveJson, loadJson, loadBackground, exportFrames, exportHeroStill,
+    verifyDeterministicFrame,
   };
 }

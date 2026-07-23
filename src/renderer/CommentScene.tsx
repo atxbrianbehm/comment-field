@@ -263,7 +263,10 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
     async renderFrame(time, width, height, options) {
       const controller = controllerRef.current;
       if (!controller) throw new Error("Renderer is not ready");
-      const blob = await renderPngBlob(controller, renderInput(time), overviewCameraRef.current, width, height, options);
+      const blob = await renderPngBlob(controller, renderInput(time), overviewCameraRef.current, width, height, {
+        transparent: options?.transparent,
+        soloCardIds: options?.soloCardIds,
+      });
       if (!controller.exporting) paint();
       return blob;
     },
@@ -312,8 +315,8 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
     const point = normalizedCanvasPoint(controller, event.clientX, event.clientY);
     if (current.mode === "record") { gestureRef.current = { start: performance.now(), samples: [{ time: 0, ...point }] }; return; }
 
-    // Overview pan: middle mouse, Alt, or Space — never competes with card/marquee selection.
-    const wantPan = isOverview && (event.button === 1 || event.altKey || event.metaKey);
+    // Overview pan: middle mouse or Alt only — never steal Cmd/Ctrl (multi-select / select-all).
+    const wantPan = isOverview && (event.button === 1 || event.altKey);
     if (wantPan) {
       const fieldPoint = fieldPointAt(controller, current.composition, event.clientX, event.clientY);
       if (fieldPoint) overviewPanRef.current = { pointer: fieldPoint, camera: { ...overviewCameraRef.current } };
@@ -327,8 +330,13 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
       selectedHitQuadsRef.current = cardScreenQuads(controller, selected);
     }
 
+    // Always re-sync poses before pick so camera + overview layout match what you see.
+    if (!isOverview) {
+      renderScene(controller, renderInput(), overviewCameraRef.current);
+    }
+
     // 1) Selected cards first — never start a marquee when grabbing a multi-selection.
-    // 2) Strict screen-space pick only (no soft radius) so blank clicks deselect / marquee.
+    // 2) Screen-space pick (quads + soft center assist for small posts).
     let cardId: string | null = null;
     if (selected.length > 0) {
       cardId = pickPreferredCardAtClient(controller, event.clientX, event.clientY, selected) ?? null;
@@ -415,7 +423,8 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
         const base = current.mode === "reflow"
           ? current.take.reflowTargets[id]
           : current.composition.cards.find((card) => card.cardId === id);
-        if (!base || base.locked) return [];
+        const placement = current.composition.cards.find((card) => card.cardId === id);
+        if (!base || placement?.locked) return [];
         return [{ cardId: id, x: base.x, y: base.y }];
       });
       // Even if every card is locked, don't start a marquee over the selection.
