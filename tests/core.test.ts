@@ -8,11 +8,14 @@ import {
   evaluateAmbientDrift,
   evaluateBezierCurve,
   evaluateCamera,
+  evaluateCardPopulation,
   evaluateEntranceComponents,
+  evaluateExitComponents,
   evaluateScene,
   evaluateSpatialPath,
   evaluateSpringOffset,
   resolveEntrancePath,
+  resolveExitPath,
   fieldPointToWorld,
   findKeyframeAt,
   generateReflowTargets,
@@ -22,7 +25,9 @@ import {
   parsePlainText,
   projectWorldPoint,
   resolveBuildTriggers,
+  resolveAuthoringDepth,
   resolveGestureTriggers,
+  resolvePostHeroBurstDelay,
   segmentProgress,
   serializeProject,
   settleCameraOnHero,
@@ -51,6 +56,8 @@ describe("deterministic project core", () => {
     const project = createDefaultProject();
     expect(project.compositions.every((composition) => composition.frameRate === 24)).toBe(true);
     expect(project.renderSettings.motionBlur).toEqual({ enabled: false, shutterAngle: 180, strength: 1 });
+    expect(project.renderSettings.sceneShadow).toMatchObject({ enabled: true, opacity: 0.28, softness: 0.55 });
+    expect(project.renderSettings.cardLighting).toMatchObject({ enabled: true, ambient: 1, intensity: 0.16 });
   });
 
   it("selects bounded desktop, tablet, and phone performance profiles", () => {
@@ -223,6 +230,35 @@ describe("deterministic project core", () => {
     expect(Math.abs(nearAfter.x - nearBefore.x)).toBeGreaterThan(Math.abs(farAfter.x - farBefore.x));
   });
 
+
+  it("keeps ordinary-card motion screen-relative while Z changes", () => {
+    const project = createDefaultProject();
+    const composition = project.compositions[0];
+    const base = composition.cards[0];
+    const take = structuredClone(project.takes[0]);
+    take.population.enabled = false;
+    take.gestureSamples = [];
+    take.cardTriggers = [{ cardId: base.cardId, triggerTime: 0, influence: 1 }];
+    const pathStart = { x: 0.12, y: 0.3 };
+    const motion = {
+      ...project.entranceMotion,
+      pathMode: "shared" as const,
+      path: { start: pathStart, control1: { x: 0.08, y: 0.2 }, control2: { x: 0.04, y: 0.1 } },
+      depthOffset: -8,
+      driftAmount: 0,
+      driftRotation: 0,
+      springAmount: 0,
+    };
+    const scene = evaluateScene(composition, take, motion, 0);
+    const card = scene.cards.find((candidate) => candidate.cardId === base.cardId)!;
+    const baseWorld = fieldPointToWorld(composition, base);
+    const baseScreen = projectWorldPoint(composition, scene.camera, { ...baseWorld, z: base.z });
+    const cardWorld = fieldPointToWorld(composition, card);
+    const cardScreen = projectWorldPoint(composition, scene.camera, { ...cardWorld, z: card.z });
+    expect(cardScreen.x).toBeCloseTo(baseScreen.x + pathStart.x, 10);
+    expect(cardScreen.y).toBeCloseTo(baseScreen.y + pathStart.y, 10);
+  });
+
   it("resolves builds and gestures deterministically", () => {
     const project = createDefaultProject();
     const composition = project.compositions[0];
@@ -244,7 +280,7 @@ describe("deterministic project core", () => {
   it("keeps gesture-unreached cards hidden until explicitly triggered", () => {
     const project = createDefaultProject();
     const composition = project.compositions[0];
-    const take = { ...project.takes[0], gestureSamples: [{ time: 0, x: 0.1, y: 0.1 }], cardTriggers: [{ cardId: composition.cards[0].cardId, triggerTime: 0, influence: 1 }] };
+    const take = { ...project.takes[0], population: { ...project.takes[0].population, enabled: false }, gestureSamples: [{ time: 0, x: 0.1, y: 0.1 }], cardTriggers: [{ cardId: composition.cards[0].cardId, triggerTime: 0, influence: 1 }] };
     const frame = evaluateScene(composition, take, project.entranceMotion, 4);
     expect(frame.cards[0].opacity).toBeCloseTo(1, 10);
     expect(frame.cards[1].opacity).toBe(0);
@@ -352,6 +388,22 @@ describe("deterministic project core", () => {
     expect(fast.blur).toBe(slow.blur);
   });
 
+  it("keeps extended positive Z responsive without crossing the production camera", () => {
+    expect(resolveAuthoringDepth(2)).toBe(2);
+    expect(resolveAuthoringDepth(4)).toBeGreaterThan(2);
+    expect(resolveAuthoringDepth(6)).toBeGreaterThan(resolveAuthoringDepth(4));
+    expect(resolveAuthoringDepth(8)).toBe(3.5);
+    expect(resolveAuthoringDepth(-8)).toBe(-8);
+
+    const population = structuredClone(createDefaultProject().takes[0].population);
+    population.exitMotion.depthOffset = 4;
+    const four = evaluateExitComponents(population, "card-a", 0, 1).depth;
+    population.exitMotion.depthOffset = 6;
+    const six = evaluateExitComponents(population, "card-a", 0, 1).depth;
+    expect(six).toBeGreaterThan(four);
+    expect(six).toBeLessThan(5);
+  });
+
   it("generates deterministic card-specific ambient drift and disables it cleanly", () => {
     const project = createDefaultProject();
     const motion = project.entranceMotion;
@@ -359,6 +411,121 @@ describe("deterministic project core", () => {
     expect(evaluateAmbientDrift("field", "one", 3.25, 1, motion)).toEqual(first);
     expect(evaluateAmbientDrift("field", "two", 3.25, 1, motion)).not.toEqual(first);
     expect(evaluateAmbientDrift("field", "one", 3.25, 1, { ...motion, driftAmount: 0, driftRotation: 0 })).toEqual({ x: 0, y: 0, rotation: 0 });
+  });
+
+  it("evaluates seeded population lifecycles without accumulated simulation", () => {
+    const settings = createDefaultProject().takes[0].population;
+    const first = evaluateCardPopulation(settings, "card-a", 3.25, 0.5, 0.7);
+    expect(evaluateCardPopulation(settings, "card-a", 3.25, 0.5, 0.7)).toEqual(first);
+    expect(evaluateCardPopulation(settings, "card-b", 3.25, 0.5, 0.7)).not.toEqual(first);
+    expect(evaluateCardPopulation({ ...settings, enabled: false }, "card-a", 0.2, 0.5, 0.7)).toMatchObject({ visible: true, scale: 1, depth: 0, x: 0, y: 0 });
+  });
+
+  it("correlates residual card-size jitter with Z depth", () => {
+    const settings = structuredClone(createDefaultProject().takes[0].population);
+    settings.initialPopulation = 1;
+    settings.lifeMin = 100;
+    settings.lifeMax = 100;
+    settings.scaleVariation = 0.1;
+    settings.depthVariation = 2;
+    const state = evaluateCardPopulation(settings, "card-a", 0, 0, 0.7);
+    expect((state.scale - 1) / settings.scaleVariation).toBeCloseTo(state.depth / settings.depthVariation, 10);
+  });
+
+  it("uses the final burst as an emitter without pre-clearing living cards", () => {
+    const living = {
+      ...createDefaultProject().takes[0].population,
+      initialPopulation: 1,
+      lifeMin: 100,
+      lifeMax: 100,
+      postHeroBurst: 1,
+      postHeroBurstDuration: 1,
+    };
+    const beforeBurst = evaluateCardPopulation(living, "card-a", 3.9, 0, 0.7, 4);
+    const withoutBurst = evaluateCardPopulation({ ...living, postHeroBurst: 0 }, "card-a", 3.9, 0, 0.7, 4);
+    const afterBurst = evaluateCardPopulation(living, "card-a", 4.1, 0, 0.7, 4);
+    expect(beforeBurst).toEqual(withoutBurst);
+    expect(afterBurst.visible).toBe(true);
+    expect(afterBurst.cycle).toBeLessThan(10_000);
+
+    const hidden = { ...living, initialPopulation: 0, lifeMin: 1, lifeMax: 1 };
+    const waiting = evaluateCardPopulation(hidden, "card-a", 3.9, 10, 0.7, 4);
+    const emitted = evaluateCardPopulation(hidden, "card-a", 5.1, 10, 0.7, 4);
+    expect(waiting.visible).toBe(false);
+    expect(emitted.visible).toBe(true);
+    expect(emitted.cycle).toBeGreaterThanOrEqual(10_000);
+  });
+
+  it("weights final-burst arrivals and uses ending-specific build, life, and exit timing", () => {
+    const base = structuredClone(createDefaultProject().takes[0].population);
+    base.initialPopulation = 0;
+    base.postHeroBurst = 1;
+    base.postHeroBurstDuration = 1;
+    base.postHeroBurstEasing = { x1: 0, y1: 0, x2: 1, y2: 1 };
+    const evenDelay = resolvePostHeroBurstDelay(base, "card-a");
+    base.postHeroBurstEasing = { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 };
+    expect(resolvePostHeroBurstDelay(base, "card-a")).toBeLessThan(evenDelay);
+
+    base.postHeroBurstDuration = 0;
+    base.postHeroEntranceDuration = 0.25;
+    base.postHeroLifeMin = 0.5;
+    base.postHeroLifeMax = 0.5;
+    base.postHeroExitDuration = 0.2;
+    const entering = evaluateCardPopulation(base, "card-a", 2.125, 10, 0.7, 2);
+    const exiting = evaluateCardPopulation(base, "card-a", 2.85, 10, 0.7, 2);
+    expect(entering.cycle).toBe(10_000);
+    expect(entering.entranceProgress).toBeCloseTo(0.5, 10);
+    expect(exiting.exitProgress).toBeCloseTo(0.5, 10);
+  });
+
+  it("evaluates independent shared and scattered out lines deterministically", () => {
+    const population = structuredClone(createDefaultProject().takes[0].population);
+    const scattered = resolveExitPath(population, "card-a", 2);
+    expect(resolveExitPath(population, "card-a", 2)).toEqual(scattered);
+    expect(resolveExitPath(population, "card-b", 2)).not.toEqual(scattered);
+    population.exitMotion.pathMode = "shared";
+    population.exitMotion.path = { start: { x: 0.4, y: -0.2 }, control1: { x: 0.3, y: -0.12 }, control2: { x: 0.1, y: -0.04 } };
+    expect(resolveExitPath(population, "card-a", 2)).toEqual(population.exitMotion.path);
+    expect(resolveExitPath(population, "card-b", 8)).toEqual(population.exitMotion.path);
+    const start = evaluateExitComponents(population, "card-a", 0, 0);
+    const end = evaluateExitComponents(population, "card-a", 0, 1);
+    expect(start.position).toEqual({ x: 0, y: 0 });
+    expect(start.opacity).toBe(1);
+    expect(end.position).toEqual(population.exitMotion.path.start);
+    expect(end.opacity).toBeCloseTo(1 - population.exitMotion.fade, 12);
+    expect(end.scale).toBe(population.exitMotion.scaleTo);
+  });
+
+  it("evaluates Out opacity independently from its transform curve", () => {
+    const population = structuredClone(createDefaultProject().takes[0].population);
+    population.exitMotion.pathMode = "shared";
+    const slow = evaluateExitComponents({
+      ...population,
+      exitMotion: {
+        ...population.exitMotion,
+        opacityEasing: { x1: 0.42, y1: 0, x2: 1, y2: 1 },
+      },
+    }, "card-a", 0, 0.35);
+    const fast = evaluateExitComponents({
+      ...population,
+      exitMotion: {
+        ...population.exitMotion,
+        opacityEasing: { x1: 0, y1: 1, x2: 0.3, y2: 1 },
+      },
+    }, "card-a", 0, 0.35);
+    expect(fast.opacity).toBeLessThan(slow.opacity);
+    expect(fast.position).toEqual(slow.position);
+    expect(fast.scale).toBe(slow.scale);
+    expect(fast.depth).toBe(slow.depth);
+  });
+
+  it("migrates legacy takes with population disabled to preserve their renders", () => {
+    const legacy = createDefaultProject() as ReturnType<typeof createDefaultProject> & { version: number };
+    legacy.version = 10;
+    for (const take of legacy.takes) delete (take as Partial<typeof take>).population;
+    const migrated = deserializeProject(JSON.stringify(legacy));
+    expect(migrated.version).toBe(16);
+    expect(migrated.takes.every((take) => take.population.enabled === false)).toBe(true);
   });
 
   it("rain path mode starts cards below settle with per-card lateral variation", () => {
@@ -392,9 +559,9 @@ describe("deterministic project core", () => {
     expect(midB.position.y).toBeGreaterThan(0);
   });
 
-  it("reframes entrance paths without changing their stored motion coordinates", () => {
+  it("reframes motion paths on both axes without changing stored coordinates", () => {
     const project = createDefaultProject();
-    const viewport = { centerY: 0.35, spanY: 1.2 };
+    const viewport = { centerX: 0, spanX: 0.4, centerY: 0.35, spanY: 1.2 };
     const point = { x: -0.08, y: 0.72 };
     const restoredPoint = editorPointToMotion(motionPointToEditor(point, viewport), viewport);
     expect(restoredPoint.x).toBeCloseTo(point.x, 12);
@@ -405,6 +572,13 @@ describe("deterministic project core", () => {
     });
     expect(motionPointToEditor({ x: 0, y: 0 }, framed).y).toBeGreaterThanOrEqual(0);
     expect(motionPointToEditor({ x: 0, y: 0.9 }, framed).y).toBeLessThanOrEqual(1);
+    const widePath = { start: { x: -1.2, y: 0.3 }, control1: { x: -0.8, y: 0.2 }, control2: { x: 0.5, y: 0.1 } };
+    const wideFrame = frameEntrancePath(widePath);
+    for (const pathPoint of [{ x: 0, y: 0 }, widePath.start, widePath.control1, widePath.control2]) {
+      const editorPoint = motionPointToEditor(pathPoint, wideFrame);
+      expect(editorPoint.x).toBeGreaterThan(0.1);
+      expect(editorPoint.x).toBeLessThan(0.9);
+    }
   });
 
   it("gives an active hero deterministic top-layer priority", () => {

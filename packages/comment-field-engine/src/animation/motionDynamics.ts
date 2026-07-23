@@ -1,6 +1,7 @@
 import type { EntranceMotionTemplate, Point2D, SpatialBezierPath } from "../models/types";
 import { clamp, lerp } from "../utils/math";
 import { evaluateBezierCurve, evaluateSpatialPath } from "./bezier";
+import { resolveAuthoringDepth } from "./depth";
 
 const TAU = Math.PI * 2;
 
@@ -100,7 +101,7 @@ export function evaluateEntranceComponents(
     drift,
     scale: lerp(motion.scaleFrom, 1, transformProgress),
     rotation: lerp(motion.rotationOffset, 0, transformProgress) + drift.rotation,
-    depth: lerp(motion.depthOffset, 0, transformProgress),
+    depth: resolveAuthoringDepth(lerp(motion.depthOffset, 0, transformProgress)),
     opacity: lerp(1 - motion.fade, 1, opacityProgress),
     blur: lerp(motion.blur, 0, easedProgress),
   };

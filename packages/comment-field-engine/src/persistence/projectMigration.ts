@@ -1,6 +1,6 @@
 import { DEFAULT_CAMERA_EASING, isLegacyCameraSnapEasing } from "../animation/camera";
 import { PROJECT_VERSION, type Project, type Take } from "../models/types";
-import { DEFAULT_ENTRANCE_MOTION, DEFAULT_RENDER_SETTINGS } from "../models/defaults";
+import { DEFAULT_CARD_POPULATION, DEFAULT_ENTRANCE_MOTION, DEFAULT_EXIT_MOTION, DEFAULT_RENDER_SETTINGS } from "../models/defaults";
 import { cloneValue } from "../utils/clone";
 
 export function serializeProject(project: Project): string {
@@ -25,6 +25,19 @@ export function migrateProject(project: Project): Project {
   migrated.renderSettings.motionBlur.enabled ??= false;
   migrated.renderSettings.motionBlur.shutterAngle ??= DEFAULT_RENDER_SETTINGS.motionBlur.shutterAngle;
   migrated.renderSettings.motionBlur.strength ??= DEFAULT_RENDER_SETTINGS.motionBlur.strength;
+  migrated.renderSettings.sceneShadow ??= cloneValue(DEFAULT_RENDER_SETTINGS.sceneShadow);
+  migrated.renderSettings.sceneShadow.enabled ??= DEFAULT_RENDER_SETTINGS.sceneShadow.enabled;
+  migrated.renderSettings.sceneShadow.opacity ??= DEFAULT_RENDER_SETTINGS.sceneShadow.opacity;
+  migrated.renderSettings.sceneShadow.softness ??= DEFAULT_RENDER_SETTINGS.sceneShadow.softness;
+  migrated.renderSettings.sceneShadow.distance ??= DEFAULT_RENDER_SETTINGS.sceneShadow.distance;
+  migrated.renderSettings.sceneShadow.angle ??= DEFAULT_RENDER_SETTINGS.sceneShadow.angle;
+  migrated.renderSettings.sceneShadow.color ??= DEFAULT_RENDER_SETTINGS.sceneShadow.color;
+  migrated.renderSettings.cardLighting ??= cloneValue(DEFAULT_RENDER_SETTINGS.cardLighting);
+  migrated.renderSettings.cardLighting.enabled ??= DEFAULT_RENDER_SETTINGS.cardLighting.enabled;
+  migrated.renderSettings.cardLighting.ambient ??= DEFAULT_RENDER_SETTINGS.cardLighting.ambient;
+  migrated.renderSettings.cardLighting.intensity ??= DEFAULT_RENDER_SETTINGS.cardLighting.intensity;
+  migrated.renderSettings.cardLighting.angle ??= DEFAULT_RENDER_SETTINGS.cardLighting.angle;
+  migrated.renderSettings.cardLighting.edge ??= DEFAULT_RENDER_SETTINGS.cardLighting.edge;
   migrated.renderSettings.transparentExport ??= DEFAULT_RENDER_SETTINGS.transparentExport;
   const legacyDurations = new Map<string, number>();
   for (const composition of migrated.compositions) {
@@ -109,6 +122,41 @@ export function migrateProject(project: Project): Project {
   }
   for (const take of migrated.takes) {
     take.duration ??= legacyDurations.get(take.compositionId) ?? 8;
+    take.population ??= {
+      ...cloneValue(DEFAULT_CARD_POPULATION),
+      enabled: false,
+      seed: `${take.build?.seed ?? take.id}-population`,
+    };
+    take.population.enabled ??= false;
+    take.population.seed ??= `${take.build?.seed ?? take.id}-population`;
+    take.population.initialPopulation ??= DEFAULT_CARD_POPULATION.initialPopulation;
+    take.population.lifeMin ??= DEFAULT_CARD_POPULATION.lifeMin;
+    take.population.lifeMax ??= DEFAULT_CARD_POPULATION.lifeMax;
+    take.population.gapMin ??= DEFAULT_CARD_POPULATION.gapMin;
+    take.population.gapMax ??= DEFAULT_CARD_POPULATION.gapMax;
+    take.population.exitDuration ??= DEFAULT_CARD_POPULATION.exitDuration;
+    take.population.wanderAmount ??= DEFAULT_CARD_POPULATION.wanderAmount;
+    take.population.scaleVariation ??= DEFAULT_CARD_POPULATION.scaleVariation;
+    take.population.depthVariation ??= DEFAULT_CARD_POPULATION.depthVariation;
+    take.population.exitDistance ??= DEFAULT_CARD_POPULATION.exitDistance;
+    take.population.exitMotion ??= cloneValue(DEFAULT_EXIT_MOTION);
+    take.population.exitMotion.pathMode ??= DEFAULT_EXIT_MOTION.pathMode;
+    take.population.exitMotion.path ??= cloneValue(DEFAULT_EXIT_MOTION.path);
+    take.population.exitMotion.easing ??= cloneValue(DEFAULT_EXIT_MOTION.easing);
+    take.population.exitMotion.opacityEasing ??= cloneValue(take.population.exitMotion.easing ?? DEFAULT_EXIT_MOTION.opacityEasing);
+    take.population.exitMotion.fade ??= DEFAULT_EXIT_MOTION.fade;
+    take.population.exitMotion.blur ??= DEFAULT_EXIT_MOTION.blur;
+    take.population.exitMotion.scaleTo ??= DEFAULT_EXIT_MOTION.scaleTo;
+    take.population.exitMotion.rotationOffset ??= DEFAULT_EXIT_MOTION.rotationOffset;
+    take.population.exitMotion.depthOffset ??= DEFAULT_EXIT_MOTION.depthOffset;
+    take.population.postHeroBurst ??= DEFAULT_CARD_POPULATION.postHeroBurst;
+    take.population.postHeroBurstStartTime ??= Math.max(0, take.duration - 2);
+    take.population.postHeroBurstDuration ??= DEFAULT_CARD_POPULATION.postHeroBurstDuration;
+    take.population.postHeroBurstEasing ??= { x1: 0, y1: 0, x2: 1, y2: 1 };
+    take.population.postHeroEntranceDuration ??= (take.entranceOverride ?? migrated.entranceMotion).duration;
+    take.population.postHeroLifeMin ??= take.population.lifeMin;
+    take.population.postHeroLifeMax ??= take.population.lifeMax;
+    take.population.postHeroExitDuration ??= take.population.exitDuration;
     take.cameraKeyframes ??= [];
     take.cameraKeyframes = take.cameraKeyframes.map((keyframe) => {
       const legacy = keyframe as typeof keyframe & { pose?: typeof keyframe.value; cut?: boolean };

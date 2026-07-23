@@ -3,8 +3,9 @@ import { clamp, ease, lerp, lerpTransform } from "../utils/math";
 import { cubicPoint, evaluateBezierCurve } from "./bezier";
 import { evaluateCamera, fieldPointToWorld, projectWorldPoint, unprojectScreenPoint, worldPointToField } from "./camera";
 import { evaluateEntranceComponents } from "./motionDynamics";
+import { evaluateCardPopulation } from "./population";
 import { segmentProgress } from "./keyframes";
-import { heroStartTime, sortedHeroKeyframes } from "./hero";
+import { heroEndTime, heroStartTime, sortedHeroKeyframes } from "./hero";
 
 export function evaluateScene(composition: Composition, take: Take, entranceMotion: EntranceMotionTemplate, absoluteTime: number): SceneState {
   const camera = evaluateCamera(composition, take, absoluteTime);
@@ -12,30 +13,58 @@ export function evaluateScene(composition: Composition, take: Take, entranceMoti
   const hero = take.hero;
   const heroKeys = hero ? sortedHeroKeyframes(hero) : [];
   const heroStart = hero ? heroStartTime(hero) : Number.POSITIVE_INFINITY;
+  const heroEnd = hero ? heroEndTime(hero) : undefined;
+  const finalBurstStart = heroEnd ?? take.population.postHeroBurstStartTime ?? Math.max(0, take.duration - 2);
+  function screenRelativeFieldPosition(base: Composition["cards"][number], z: number, offset: Point2D) {
+    const baseWorld = fieldPointToWorld(composition, base);
+    const baseScreen = projectWorldPoint(composition, camera, { ...baseWorld, z: base.z });
+    const world = unprojectScreenPoint(composition, camera, {
+      x: baseScreen.x + offset.x,
+      y: baseScreen.y + offset.y,
+    }, z);
+    return worldPointToField(composition, world);
+  }
+
   function evaluateOrdinary(base: Composition["cards"][number], time: number, forceReveal = false) {
     const trigger = triggers.get(base.cardId);
+    const triggerTime = trigger?.triggerTime ?? 0;
+    const population = evaluateCardPopulation(take.population, base.cardId, time, triggerTime, entranceMotion.duration, finalBurstStart);
     const rawBuild = trigger
-      ? (time - trigger.triggerTime) / Math.max(0.001, entranceMotion.duration)
+      ? population.entranceProgress
       : take.gestureSamples.length > 0 && !forceReveal ? 0 : 1;
     const motion = evaluateEntranceComponents(entranceMotion, rawBuild, time, composition.seed, base.cardId);
+    const z = base.z + motion.depth + population.depth;
+    const baseOffset = {
+      x: motion.position.x - motion.drift.x + population.x,
+      y: motion.position.y - motion.drift.y + population.y,
+    };
+    const position = screenRelativeFieldPosition(base, z, {
+      x: baseOffset.x + motion.drift.x,
+      y: baseOffset.y + motion.drift.y,
+    });
+    const basePosition = screenRelativeFieldPosition(base, z, baseOffset);
     const baseTransform: Transform = {
-      x: base.x + motion.position.x - motion.drift.x,
-      y: base.y + motion.position.y - motion.drift.y,
-      z: base.z + motion.depth,
-      scale: base.scale * motion.scale,
-      rotation: base.rotation + motion.rotation - motion.drift.rotation,
+      x: basePosition.x,
+      y: basePosition.y,
+      z,
+      scale: base.scale * motion.scale * population.scale,
+      rotation: base.rotation + motion.rotation - motion.drift.rotation + population.rotation,
     };
     return {
       baseTransform,
       transform: {
         ...baseTransform,
-        x: baseTransform.x + motion.drift.x,
-        y: baseTransform.y + motion.drift.y,
+        x: position.x,
+        y: position.y,
         rotation: baseTransform.rotation + motion.drift.rotation,
       },
-      drift: motion.drift,
-      opacity: motion.opacity,
-      blur: motion.blur,
+      drift: {
+        x: position.x - basePosition.x,
+        y: position.y - basePosition.y,
+        rotation: motion.drift.rotation,
+      },
+      opacity: population.visible ? motion.opacity * population.opacity : 0,
+      blur: motion.blur + population.blur,
     };
   }
   const cards: EvaluatedCard[] = composition.cards.map((base) => {

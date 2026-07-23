@@ -2,7 +2,7 @@ import { resolveBuildTriggers } from "../animation/build";
 import { DEFAULT_COMMENTS } from "../fixtures/defaultComments";
 import { generateScatter } from "../layout/scatter";
 import { cloneValue } from "../utils/clone";
-import type { BuildPerformance, CardStyle, Composition, EntranceMotionTemplate, Project, RenderSettings, ScatterSettings, Take } from "./types";
+import type { BuildPerformance, CardPopulationSettings, CardStyle, Composition, EntranceMotionTemplate, ExitMotionTemplate, Project, RenderSettings, ScatterSettings, Take } from "./types";
 import { PROJECT_VERSION } from "./types";
 
 export const DEFAULT_CARD_STYLE: CardStyle = {
@@ -55,6 +55,21 @@ export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
     shutterAngle: 180,
     strength: 1,
   },
+  sceneShadow: {
+    enabled: true,
+    opacity: 0.28,
+    softness: 0.55,
+    distance: 0.018,
+    angle: 55,
+    color: "#120D09",
+  },
+  cardLighting: {
+    enabled: true,
+    ambient: 1,
+    intensity: 0.16,
+    angle: -45,
+    edge: 0.08,
+  },
   transparentExport: false,
 };
 
@@ -81,6 +96,46 @@ export const DEFAULT_BUILD: BuildPerformance = {
   staggerStart: 0,
   staggerEnd: 2.6,
   order: "random",
+};
+
+export const DEFAULT_EXIT_MOTION: ExitMotionTemplate = {
+  pathMode: "scatter",
+  path: {
+    start: { x: 0.24, y: -0.12 },
+    control1: { x: 0.16, y: -0.08 },
+    control2: { x: 0.05, y: -0.02 },
+  },
+  easing: { x1: 0.4, y1: 0, x2: 0.7, y2: 1 },
+  opacityEasing: { x1: 0.42, y1: 0, x2: 1, y2: 1 },
+  fade: 1,
+  blur: 4,
+  scaleTo: 1.08,
+  rotationOffset: 0.1,
+  depthOffset: 0.28,
+};
+
+export const DEFAULT_CARD_POPULATION: CardPopulationSettings = {
+  enabled: true,
+  seed: "population-01",
+  initialPopulation: 0.35,
+  lifeMin: 1.8,
+  lifeMax: 4.5,
+  gapMin: 0.45,
+  gapMax: 1.35,
+  exitDuration: 0.45,
+  wanderAmount: 0.025,
+  scaleVariation: 0.04,
+  depthVariation: 1.2,
+  exitDistance: 0.32,
+  exitMotion: cloneValue(DEFAULT_EXIT_MOTION),
+  postHeroBurst: 0.9,
+  postHeroBurstStartTime: 6,
+  postHeroBurstDuration: 0.5,
+  postHeroBurstEasing: { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 },
+  postHeroEntranceDuration: 1 / 3,
+  postHeroLifeMin: 0.75,
+  postHeroLifeMax: 1.5,
+  postHeroExitDuration: 1 / 3,
 };
 
 function createComposition(id: string, name: string, width: number, height: number, seed: string): Composition {
@@ -112,6 +167,7 @@ function createTake(id: string, composition: Composition, name: string): Take {
     build,
     gestureSamples: [],
     cardTriggers: resolveBuildTriggers(composition.cards, build),
+    population: cloneValue({ ...DEFAULT_CARD_POPULATION, seed: `${composition.seed}-population` }),
     hero: null,
     reflowTargets: {},
     cameraKeyframes: [],

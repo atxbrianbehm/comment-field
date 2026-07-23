@@ -13,7 +13,7 @@ describe("project schema migration", () => {
     delete (legacy.cardStyle as Partial<typeof legacy.cardStyle>).showHandle;
     delete (legacy.cardStyle as Partial<typeof legacy.cardStyle>).showTimestamp;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(10);
+    expect(restored.version).toBe(16);
     expect(restored.cardStyle.strokeWidth).toBe(0);
     expect(restored.cardStyle.strokeColor).toBe("#1B1B18");
     expect(restored.cardStyle.showAvatar).toBe(true);
@@ -34,7 +34,7 @@ describe("project schema migration", () => {
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).driftSpeed;
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).driftRotation;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(10);
+    expect(restored.version).toBe(16);
     expect(restored.entranceMotion).toMatchObject({ springAmount: 0, springBounces: 0, springDamping: 0, driftAmount: 0, driftSpeed: 0, driftRotation: 0 });
   });
 
@@ -44,7 +44,7 @@ describe("project schema migration", () => {
     for (const composition of legacy.compositions) delete (composition as Partial<typeof composition>).fieldBounds;
     for (const take of legacy.takes) delete (take as Partial<typeof take>).cameraKeyframes;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(10);
+    expect(restored.version).toBe(16);
     expect(restored.compositions.every((composition) => composition.fieldBounds.width === 1 && composition.fieldBounds.height === 1)).toBe(true);
     expect(restored.takes.every((take) => take.cameraKeyframes.length === 0)).toBe(true);
     expect(evaluateCamera(restored.compositions[0], restored.takes[0], 3)).toEqual(restored.compositions[0].camera);
@@ -65,7 +65,7 @@ describe("project schema migration", () => {
       reflowDuration: 1.1, easing: "ease-out", reflowEasing: "ease-out",
     };
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(10);
+    expect(restored.version).toBe(16);
     expect(restored.takes.every((candidate) => candidate.duration === 12)).toBe(true);
     expect(restored.compositions.every((composition) => !("duration" in composition))).toBe(true);
     expect(restored.takes[0].hero?.keyframes).toHaveLength(2);
@@ -78,7 +78,7 @@ describe("project schema migration", () => {
     legacy.entranceMotion.easing = { x1: 0.65, y1: 0, x2: 0.35, y2: 1 };
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).opacityEasing;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(10);
+    expect(restored.version).toBe(16);
     expect(restored.entranceMotion.opacityEasing).toEqual(restored.entranceMotion.easing);
   });
 
@@ -88,9 +88,11 @@ describe("project schema migration", () => {
     legacy.compositions[0].frameRate = 30;
     delete (legacy as Partial<Project>).renderSettings;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(10);
+    expect(restored.version).toBe(16);
     expect(restored.compositions[0].frameRate).toBe(30);
     expect(restored.renderSettings.motionBlur).toEqual({ enabled: false, shutterAngle: 180, strength: 1 });
+    expect(restored.renderSettings.sceneShadow).toMatchObject({ enabled: true, opacity: 0.28, softness: 0.55 });
+    expect(restored.renderSettings.cardLighting).toMatchObject({ enabled: true, ambient: 1, intensity: 0.16 });
     expect(restored.renderSettings.transparentExport).toBe(false);
   });
 
@@ -101,9 +103,54 @@ describe("project schema migration", () => {
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).rainDistance;
     delete (legacy.entranceMotion as Partial<typeof legacy.entranceMotion>).rainLateral;
     const restored = deserializeProject(JSON.stringify(legacy));
-    expect(restored.version).toBe(10);
+    expect(restored.version).toBe(16);
     expect(restored.entranceMotion.pathMode).toBe("shared");
     expect(restored.entranceMotion.rainDistance).toBe(0.55);
     expect(restored.entranceMotion.rainLateral).toBe(0.22);
+  });
+
+  it("migrates schema-v11 population cards with a separate out template", () => {
+    const legacy = createDefaultProject();
+    legacy.version = 11;
+    for (const take of legacy.takes) delete (take.population as Partial<typeof take.population>).exitMotion;
+    const restored = deserializeProject(JSON.stringify(legacy));
+    expect(restored.version).toBe(16);
+    expect(restored.takes.every((take) => take.population.exitMotion.pathMode === "scatter")).toBe(true);
+    expect(restored.takes.every((take) => take.population.exitMotion.fade === 1)).toBe(true);
+  });
+
+  it("migrates schema-v12 Out opacity onto the legacy transform curve", () => {
+    const legacy = createDefaultProject();
+    legacy.version = 12;
+    legacy.takes[0].population.exitMotion.easing = { x1: 0.2, y1: 0, x2: 0.8, y2: 1 };
+    delete (legacy.takes[0].population.exitMotion as { opacityEasing?: unknown }).opacityEasing;
+    const restored = deserializeProject(JSON.stringify(legacy));
+    expect(restored.version).toBe(16);
+    expect(restored.takes[0].population.exitMotion.opacityEasing).toEqual(restored.takes[0].population.exitMotion.easing);
+  });
+
+  it("migrates schema-v13 post-hero timing without changing its old lifecycle", () => {
+    const legacy = createDefaultProject();
+    legacy.version = 13;
+    const population = legacy.takes[0].population;
+    population.lifeMin = 1.1;
+    population.lifeMax = 2.2;
+    population.exitDuration = 0.6;
+    const legacyPopulation = population as Partial<typeof population>;
+    delete legacyPopulation.postHeroBurstStartTime;
+    delete legacyPopulation.postHeroBurstEasing;
+    delete legacyPopulation.postHeroEntranceDuration;
+    delete legacyPopulation.postHeroLifeMin;
+    delete legacyPopulation.postHeroLifeMax;
+    delete legacyPopulation.postHeroExitDuration;
+    const restored = deserializeProject(JSON.stringify(legacy));
+    const migrated = restored.takes[0].population;
+    expect(restored.version).toBe(16);
+    expect(migrated.postHeroBurstStartTime).toBe(restored.takes[0].duration - 2);
+    expect(migrated.postHeroBurstEasing).toEqual({ x1: 0, y1: 0, x2: 1, y2: 1 });
+    expect(migrated.postHeroEntranceDuration).toBe(restored.entranceMotion.duration);
+    expect(migrated.postHeroLifeMin).toBe(1.1);
+    expect(migrated.postHeroLifeMax).toBe(2.2);
+    expect(migrated.postHeroExitDuration).toBe(0.6);
   });
 });

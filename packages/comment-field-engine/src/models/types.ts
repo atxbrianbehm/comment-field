@@ -1,4 +1,4 @@
-export const PROJECT_VERSION = 10;
+export const PROJECT_VERSION = 16;
 
 export interface CommentRecord {
   id: string;
@@ -183,8 +183,27 @@ export interface MotionBlurSettings {
   strength: number;
 }
 
+export interface SceneShadowSettings {
+  enabled: boolean;
+  opacity: number;
+  softness: number;
+  distance: number;
+  angle: number;
+  color: string;
+}
+
+export interface CardLightingSettings {
+  enabled: boolean;
+  ambient: number;
+  intensity: number;
+  angle: number;
+  edge: number;
+}
+
 export interface RenderSettings {
   motionBlur: MotionBlurSettings;
+  sceneShadow: SceneShadowSettings;
+  cardLighting: CardLightingSettings;
   /** When true, PNG sequence export clears to transparent and omits the composition background. */
   transparentExport: boolean;
 }
@@ -237,6 +256,51 @@ export interface CardTrigger {
   influence: number;
 }
 
+/** Take-specific seeded orchestration for a field that stays alive after its first build. */
+export interface CardPopulationSettings {
+  enabled: boolean;
+  seed: string;
+  /** Fraction of cards already living behind the action at frame zero. */
+  initialPopulation: number;
+  lifeMin: number;
+  lifeMax: number;
+  gapMin: number;
+  gapMax: number;
+  exitDuration: number;
+  wanderAmount: number;
+  scaleVariation: number;
+  depthVariation: number;
+  exitDistance: number;
+  exitMotion: ExitMotionTemplate;
+  /** Fraction relaunched after the final hero key. */
+  postHeroBurst: number;
+  /** Manual trigger used when the take has no hero performance. */
+  postHeroBurstStartTime: number;
+  /** Window in seconds across which eligible cards relaunch. */
+  postHeroBurstDuration: number;
+  /** Shapes deterministic card delays inside the burst window. */
+  postHeroBurstEasing: CubicBezierCurve;
+  postHeroEntranceDuration: number;
+  postHeroLifeMin: number;
+  postHeroLifeMax: number;
+  postHeroExitDuration: number;
+}
+
+export type ExitPathMode = "shared" | "scatter";
+
+/** Shared transform and spatial shape used whenever a population card leaves. */
+export interface ExitMotionTemplate {
+  pathMode: ExitPathMode;
+  path: SpatialBezierPath;
+  easing: CubicBezierCurve;
+  opacityEasing: CubicBezierCurve;
+  fade: number;
+  blur: number;
+  scaleTo: number;
+  rotationOffset: number;
+  depthOffset: number;
+}
+
 export interface HeroPerformance {
   cardId: string;
   keyframes?: HeroKeyframe[];
@@ -284,6 +348,7 @@ export interface Take {
   entranceOverride?: EntranceMotionTemplate;
   gestureSamples: GestureSample[];
   cardTriggers: CardTrigger[];
+  population: CardPopulationSettings;
   hero: HeroPerformance | null;
   reflowTargets: Record<string, Transform>;
   cameraKeyframes: CameraKeyframe[];
