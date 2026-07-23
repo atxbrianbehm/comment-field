@@ -20,7 +20,9 @@ import { createCardTextureFromSource } from "./cardTexture";
 import { WebGPURenderer } from "./webgpuRenderer.js";
 import { CardRasterService } from "./cardRasterService";
 import { createPerformanceTelemetry, type PerformanceTelemetryRecorder, type PerformanceTelemetrySnapshot } from "./performanceTelemetry";
+import { computeCardMotionBlur } from "./motionBlur";
 import { packReadbackPixels } from "./previewCache";
+import { createShadowMaterial, setShadowMaterialTexture, type ShadowMaterial } from "./shadowMaterial.js";
 
 export interface RuntimeCacheStatus {
   state: "ready" | "rebuilding";
@@ -45,6 +47,11 @@ export interface SceneRenderInput {
   viewMode: "camera" | "overview";
   showTransformHandles: boolean;
   renderSettings: RenderSettings;
+  /**
+   * When set, only these card ids are drawn (others hidden).
+   * Used for solo hero / single-card PNG exports.
+   */
+  soloCardIds?: string[] | null;
 }
 
 export interface RuntimeSelectionOverlay {
@@ -68,7 +75,9 @@ export interface SceneController {
   renderer: WebGPURenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  shadows: THREE.Group;
   cards: THREE.Group;
+  shadowMeshes: Map<string, THREE.Mesh<THREE.PlaneGeometry, ShadowMaterial>>;
   meshes: Map<string, THREE.Mesh<THREE.PlaneGeometry, CardMaterial>>;
   cache: Map<string, CachedTexture>;
   frameWidth: number;
@@ -93,19 +102,30 @@ export async function createSceneController(options: { canvasPixelRatio?: number
   renderer.setPixelRatio(canvasPixelRatio);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 100);
+  const shadows = new THREE.Group();
   const cards = new THREE.Group();
-  scene.add(cards);
-  return { renderer, scene, camera, cards, meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null, telemetry: createPerformanceTelemetry(), rasterizer: new CardRasterService(), canvasPixelRatio, cardTexturePixelRatio } satisfies SceneController;
+  scene.add(shadows, cards);
+  return { renderer, scene, camera, shadows, cards, shadowMeshes: new Map(), meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null, telemetry: createPerformanceTelemetry(), rasterizer: new CardRasterService(), canvasPixelRatio, cardTexturePixelRatio } satisfies SceneController;
 }
 
 export function getSceneTelemetry(controller: SceneController): PerformanceTelemetrySnapshot {
   return controller.telemetry.snapshot();
 }
 
+function ensureShadowLayer(controller: SceneController) {
+  if (!controller.shadows) {
+    controller.shadows = new THREE.Group();
+    controller.scene.add(controller.shadows);
+  }
+  if (!controller.shadowMeshes) controller.shadowMeshes = new Map();
+}
+
 export function disposeSceneController(controller: SceneController) {
+  ensureShadowLayer(controller);
   controller.previewTarget?.dispose();
   controller.rasterizer.dispose();
   controller.cache.forEach(({ texture }) => texture.dispose());
+  controller.shadowMeshes.forEach((mesh) => { mesh.geometry.dispose(); mesh.material.dispose(); });
   controller.meshes.forEach((mesh) => { mesh.geometry.dispose(); mesh.material.dispose(); });
   controller.renderer.dispose();
   controller.renderer.domElement.remove();
@@ -132,7 +152,7 @@ export async function renderPngBlob(
   overviewCamera: CameraPose,
   width: number,
   height: number,
-  options: { transparent?: boolean } = {},
+  options: { transparent?: boolean; soloCardIds?: string[] | null } = {},
 ) {
   const temporaryExport = !controller.exporting;
   if (temporaryExport) {
@@ -141,8 +161,11 @@ export async function renderPngBlob(
   }
   const previousBackground = controller.scene.background;
   if (options.transparent) controller.scene.background = null;
+  const renderInput: SceneRenderInput = options.soloCardIds?.length
+    ? { ...input, soloCardIds: options.soloCardIds }
+    : input;
   try {
-    renderScene(controller, input, overviewCamera, {
+    renderScene(controller, renderInput, overviewCamera, {
       clean: true,
       production: true,
       transparentBackground: Boolean(options.transparent),
@@ -163,9 +186,37 @@ export function endSceneExport(controller: SceneController) {
   resizeScene(controller, controller.frameWidth, controller.frameHeight);
 }
 
+/**
+ * Pull the camera back far enough to see the full field plus cards that sit
+ * slightly outside the active camera frame (common in 1-screen mode).
+ */
 export function fittedOverviewCamera(composition: Composition): CameraPose {
-  const scale = Math.max(composition.fieldBounds.width, composition.fieldBounds.height);
-  return { ...composition.camera, x: 0, y: 0, z: Math.max(2, composition.camera.z * scale * 1.08) };
+  const bounds = composition.fieldBounds;
+  let minX = 0.5 - bounds.width / 2;
+  let maxX = 0.5 + bounds.width / 2;
+  let minY = 0.5 - bounds.height / 2;
+  let maxY = 0.5 + bounds.height / 2;
+  // Expand to include every card center (and a little scale room) so off-canvas posts stay visible.
+  for (const card of composition.cards) {
+    const half = 0.08 * Math.max(0.35, card.scale);
+    minX = Math.min(minX, card.x - half);
+    maxX = Math.max(maxX, card.x + half);
+    minY = Math.min(minY, card.y - half);
+    maxY = Math.max(maxY, card.y + half);
+  }
+  const span = Math.max(maxX - minX, maxY - minY, 1);
+  // Extra padding so edge cards aren't clipped at the frame border.
+  const scale = span * 1.22;
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  // Field 0.5,0.5 → world origin; offset overview when content is not centered.
+  const dimensions = compositionWorldDimensions(composition);
+  return {
+    ...composition.camera,
+    x: (centerX - 0.5) * dimensions.width,
+    y: (0.5 - centerY) * dimensions.height,
+    z: Math.max(2.4, composition.camera.z * scale),
+  };
 }
 
 function screenPoint(point: THREE.Vector3, controller: SceneController) {
@@ -190,6 +241,18 @@ function configureCamera(
 function selectedIdsFromInput(input: SceneRenderInput) {
   if (input.selectedCardIds?.length) return input.selectedCardIds;
   return input.selectedCardId ? [input.selectedCardId] : [];
+}
+
+function hexColorChannels(value: string) {
+  const raw = value.replace("#", "").trim();
+  const normalized = raw.length === 3 ? raw.split("").map((character) => character + character).join("") : raw.padEnd(6, "0").slice(0, 6);
+  const number = Number.parseInt(normalized, 16);
+  if (!Number.isFinite(number)) return { red: 0.07, green: 0.05, blue: 0.04 };
+  return {
+    red: ((number >> 16) & 255) / 255,
+    green: ((number >> 8) & 255) / 255,
+    blue: (number & 255) / 255,
+  };
 }
 
 function meshScreenQuad(controller: SceneController, mesh: THREE.Mesh<THREE.PlaneGeometry, CardMaterial>) {
@@ -254,6 +317,7 @@ function fieldOverlay(controller: SceneController, input: SceneRenderInput, outp
 
 export function renderScene(controller: SceneController, input: SceneRenderInput, overviewCamera: CameraPose, options: { target?: THREE.RenderTarget | null; clean?: boolean; production?: boolean; transparentBackground?: boolean } = {}) {
   const startedAt = performance.now();
+  ensureShadowLayer(controller);
   const dimensions = compositionWorldDimensions(input.composition);
   const entrance = input.take.entranceOverride ?? input.entranceMotion;
   const state = evaluateScene(input.composition, input.take, entrance, input.time);
@@ -269,45 +333,88 @@ export function renderScene(controller: SceneController, input: SceneRenderInput
   configureCamera(controller, input.composition, renderCamera, { transparentBackground: options.transparentBackground });
   controller.camera.updateMatrixWorld(true);
   const selectedSet = !options.clean ? new Set(selectedIdsFromInput(input)) : null;
+  const soloSet = input.soloCardIds?.length ? new Set(input.soloCardIds) : null;
   const placementById = new Map(input.composition.cards.map((card) => [card.cardId, card]));
+  const shadowSettings = input.renderSettings.sceneShadow;
+  const shadowColor = hexColorChannels(shadowSettings.color);
+  const lighting = input.renderSettings.cardLighting;
   for (const card of state.cards) {
     const mesh = controller.meshes.get(card.cardId);
+    const shadowMesh = controller.shadowMeshes.get(card.cardId);
     if (!mesh) continue;
     const placement = layoutEdit ? (placementById.get(card.cardId) ?? card) : card;
     mesh.position.set((placement.x - 0.5) * dimensions.width, (0.5 - placement.y) * dimensions.height, placement.z);
     mesh.rotation.z = -placement.rotation;
     mesh.scale.setScalar(placement.scale);
-    mesh.visible = layoutEdit ? true : card.opacity > 0.005;
-    const previous = previousCards.get(card.cardId);
-    let motionX = 0;
-    let motionY = 0;
-    let motionAmount = 0;
-    if (previous && !layoutEdit) {
-      const currentWorld = fieldPointToWorld(input.composition, card);
-      const previousWorld = fieldPointToWorld(input.composition, previous);
-      const currentScreen = projectWorldPoint(input.composition, state.camera, { ...currentWorld, z: card.z });
-      const previousScreen = projectWorldPoint(input.composition, previousState!.camera, { ...previousWorld, z: previous.z });
-      const strength = motionBlur.strength;
-      motionX = THREE.MathUtils.clamp((currentScreen.x - previousScreen.x) * strength * 3, -0.12, 0.12);
-      motionY = THREE.MathUtils.clamp((currentScreen.y - previousScreen.y) * strength * 3, -0.12, 0.12);
-      motionAmount = Math.min(1, Math.hypot(currentScreen.x - previousScreen.x, currentScreen.y - previousScreen.y) * strength * 20);
+    const soloHidden = Boolean(soloSet && !soloSet.has(card.cardId));
+    // Solo exports always show the target card (even mid-entrance) and hide everyone else.
+    mesh.visible = soloHidden ? false : layoutEdit || soloSet ? true : card.opacity > 0.005;
+    if (shadowMesh) {
+      const shadowZ = placement.z - 0.006;
+      const centerWorld = fieldPointToWorld(input.composition, placement);
+      const centerScreen = projectWorldPoint(input.composition, renderCamera, { ...centerWorld, z: placement.z });
+      const shadowAngle = shadowSettings.angle * Math.PI / 180;
+      const shadowScreen = {
+        x: centerScreen.x + Math.cos(shadowAngle) * shadowSettings.distance,
+        y: centerScreen.y + Math.sin(shadowAngle) * shadowSettings.distance,
+      };
+      const shadowWorld = unprojectScreenPoint(input.composition, renderCamera, shadowScreen, shadowZ);
+      shadowMesh.position.set(shadowWorld.x, shadowWorld.y, shadowZ);
+      shadowMesh.rotation.z = -placement.rotation;
+      shadowMesh.scale.setScalar(placement.scale * (1 + shadowSettings.softness * 0.045));
+      shadowMesh.visible = mesh.visible && shadowSettings.enabled && shadowSettings.opacity > 0.001;
+      shadowMesh.material.shadowUniforms.opacity.value = (layoutEdit || soloSet ? 1 : card.opacity) * shadowSettings.opacity;
+      shadowMesh.material.shadowUniforms.softness.value = shadowSettings.softness;
+      shadowMesh.material.shadowUniforms.red.value = shadowColor.red;
+      shadowMesh.material.shadowUniforms.green.value = shadowColor.green;
+      shadowMesh.material.shadowUniforms.blue.value = shadowColor.blue;
     }
-    const effects = !layoutEdit && (card.blur > 0.01 || motionAmount > 0.0001);
+    const previous = previousCards.get(card.cardId);
+    let motion = {
+      center: { x: 0, y: 0 },
+      uAxis: { x: 0, y: 0 },
+      vAxis: { x: 0, y: 0 },
+      amount: 0,
+    };
+    if (previous && !layoutEdit) {
+      motion = computeCardMotionBlur(
+        input.composition,
+        state.camera,
+        previousState!.camera,
+        card,
+        previous,
+        mesh.geometry.parameters.width,
+        mesh.geometry.parameters.height,
+        motionBlur.strength,
+      );
+    }
+    const effects = !layoutEdit && (card.blur > 0.01 || motion.amount > 0.0001);
     if (mesh.material.cardEffectMode !== effects) {
       const texture = controller.cache.get(card.cardId)?.texture;
       if (texture) { mesh.material.dispose(); mesh.material = createCardMaterial(texture, effects); }
     }
-    mesh.material.cardUniforms.opacity.value = layoutEdit ? 1 : card.opacity;
+    mesh.material.cardUniforms.opacity.value = layoutEdit || soloSet ? 1 : card.opacity;
     mesh.material.cardUniforms.blur.value = layoutEdit ? 0 : card.blur;
     const isSelected = Boolean(selectedSet?.has(card.cardId));
     mesh.material.cardUniforms.selected.value = isSelected ? 1 : 0;
     mesh.material.cardUniforms.hero.value = input.take.hero?.cardId === card.cardId ? 1 : 0;
-    mesh.material.cardUniforms.motionX.value = motionX;
-    mesh.material.cardUniforms.motionY.value = motionY;
-    mesh.material.cardUniforms.motionAmount.value = motionAmount;
+    mesh.material.cardUniforms.motionCenterX.value = motion.center.x;
+    mesh.material.cardUniforms.motionCenterY.value = motion.center.y;
+    mesh.material.cardUniforms.motionUAxisX.value = motion.uAxis.x;
+    mesh.material.cardUniforms.motionUAxisY.value = motion.uAxis.y;
+    mesh.material.cardUniforms.motionVAxisX.value = motion.vAxis.x;
+    mesh.material.cardUniforms.motionVAxisY.value = motion.vAxis.y;
+    mesh.material.cardUniforms.motionAmount.value = motion.amount;
+    const lightAngle = lighting.angle * Math.PI / 180 + placement.rotation;
+    mesh.material.cardUniforms.lightDirectionX.value = Math.cos(lightAngle);
+    mesh.material.cardUniforms.lightDirectionY.value = -Math.sin(lightAngle);
+    mesh.material.cardUniforms.lightAmbient.value = lighting.enabled ? lighting.ambient : 1;
+    mesh.material.cardUniforms.lightIntensity.value = lighting.enabled ? lighting.intensity : 0;
+    mesh.material.cardUniforms.lightEdge.value = lighting.enabled ? lighting.edge : 0;
     // Keep selected cards painted (and hit-tested) above overlaps.
     const selectedBoost = isSelected ? (card.cardId === input.selectedCardId ? 500_000 : 400_000) : 0;
     mesh.renderOrder = card.layerPriority + selectedBoost;
+    if (shadowMesh) shadowMesh.renderOrder = mesh.renderOrder - 1;
   }
   controller.renderer.setRenderTarget(options.target ?? null);
   controller.renderer.render(controller.scene, controller.camera);
@@ -357,8 +464,8 @@ function preferredIdSet(preferredCardIds?: string | string[] | null) {
 function clientToFramePoint(controller: SceneController, clientX: number, clientY: number) {
   const rect = controller.renderer.domElement.getBoundingClientRect();
   if (rect.width < 1 || rect.height < 1) return null;
-  // Allow a few px of slack outside the canvas edge so card borders stay grabbable.
-  const pad = 8;
+  // Allow slack outside the canvas edge so card borders stay grabbable.
+  const pad = 16;
   if (
     clientX < rect.left - pad || clientX > rect.right + pad
     || clientY < rect.top - pad || clientY > rect.bottom + pad
@@ -414,26 +521,50 @@ export function pickCardAtClient(
 
   const preferred = preferredIdSet(preferredCardIds);
 
-  type Hit = { id: string; renderOrder: number; z: number; preferred: boolean };
+  type Hit = { id: string; renderOrder: number; z: number; preferred: boolean; area: number };
   const hits: Hit[] = [];
+  let nearestId: string | undefined;
+  let nearestDist = Math.max(controller.frameWidth, controller.frameHeight) * 0.045;
   for (const [cardId, mesh] of controller.meshes) {
+    if (!mesh.visible) continue;
     const quad = meshScreenQuad(controller, mesh);
-    if (!quadHitsPoint(px, py, quad.points, quad.center, preferred.has(cardId) ? 1.35 : 1.18, preferred.has(cardId) ? 22 : 12)) {
+    // Degenerate / off-screen centers still get a soft radius for thin cards.
+    const dist = Math.hypot(quad.center.x - px, quad.center.y - py);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearestId = cardId;
+    }
+    if (!quadHitsPoint(px, py, quad.points, quad.center, preferred.has(cardId) ? 1.4 : 1.28, preferred.has(cardId) ? 28 : 18)) {
       continue;
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const point of quad.points) {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
     }
     hits.push({
       id: cardId,
       renderOrder: mesh.renderOrder,
       z: mesh.position.z,
       preferred: preferred.has(cardId),
+      area: Math.max(1, (maxX - minX) * (maxY - minY)),
     });
   }
-  // No soft center fallback here — blank space must remain clickable for deselect/marquee.
-  if (!hits.length) return undefined;
+  if (!hits.length) {
+    // Soft center assist for small/rotated cards that miss strict quads.
+    return nearestId;
+  }
   hits.sort((a, b) => {
     if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+    // Prefer smaller (top-most looking) cards when stacked so tiny posts stay selectable.
     if (a.renderOrder !== b.renderOrder) return b.renderOrder - a.renderOrder;
-    return b.z - a.z;
+    if (Math.abs(a.z - b.z) > 1e-4) return b.z - a.z;
+    return a.area - b.area;
   });
   return hits[0]?.id;
 }
@@ -479,7 +610,7 @@ export function pickPreferredCardAtClient(
     if (!mesh) continue;
     const quad = meshScreenQuad(controller, mesh);
     // Modest pad: easy to grab selected cards, but blank gaps stay empty.
-    if (!quadHitsPoint(px, py, quad.points, quad.center, 1.2, 10)) continue;
+    if (!quadHitsPoint(px, py, quad.points, quad.center, 1.3, 16)) continue;
     const dist = Math.hypot(quad.center.x - px, quad.center.y - py);
     if (dist < bestDist) {
       bestDist = dist;
@@ -540,6 +671,7 @@ export function fieldPointAt(controller: SceneController, composition: Compositi
 }
 
 export function syncSceneAssets(controller: SceneController, input: Pick<SceneRenderInput, "composition" | "comments" | "cardStyle">, previous: { style: string; comments: string; cards: string } | null, onStatus: (status: RuntimeCacheStatus) => void, onRender: () => void) {
+  ensureShadowLayer(controller);
   const style = JSON.stringify(input.cardStyle);
   const commentsSignature = JSON.stringify(input.comments);
   const cards = JSON.stringify({ id: input.composition.id, width: input.composition.width, height: input.composition.height, ids: input.composition.cards.map((card) => card.cardId) });
@@ -549,11 +681,22 @@ export function syncSceneAssets(controller: SceneController, input: Pick<SceneRe
   for (const [cardId, mesh] of controller.meshes) {
     if (desiredIds.has(cardId)) continue;
     controller.cards.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); controller.meshes.delete(cardId);
+    const shadow = controller.shadowMeshes.get(cardId);
+    if (shadow) {
+      controller.shadows.remove(shadow);
+      shadow.geometry.dispose();
+      shadow.material.dispose();
+      controller.shadowMeshes.delete(cardId);
+    }
     controller.cache.get(cardId)?.texture.dispose(); controller.cache.delete(cardId);
   }
   const dirty = input.composition.cards.filter((placement) => {
     const comment = commentsById.get(placement.cardId);
-    return Boolean(comment && (controller.cache.get(placement.cardId)?.key !== createCardTextureKey(comment, input.cardStyle) || !controller.meshes.has(placement.cardId)));
+    return Boolean(comment && (
+      controller.cache.get(placement.cardId)?.key !== createCardTextureKey(comment, input.cardStyle)
+      || !controller.meshes.has(placement.cardId)
+      || !controller.shadowMeshes.has(placement.cardId)
+    ));
   });
   const reason = !previous ? "initial texture build" : previous.style !== style ? "card template changed" : previous.comments !== commentsSignature ? "comment content changed" : "composition card set changed";
   const total = input.composition.cards.length;
@@ -577,9 +720,21 @@ export function syncSceneAssets(controller: SceneController, input: Pick<SceneRe
       rendered.texture.addEventListener("dispose", raster.dispose);
       const planeWidth = Math.min(dimensions.width * 0.24, 1.2);
       const geometry = new THREE.PlaneGeometry(planeWidth, planeWidth / rendered.aspect);
+      const shadowGeometry = new THREE.PlaneGeometry(planeWidth, planeWidth / rendered.aspect);
       const existing = controller.meshes.get(placement.cardId);
       if (existing) { existing.geometry.dispose(); existing.geometry = geometry; setCardMaterialTexture(existing.material, rendered.texture); }
       else { const mesh = new THREE.Mesh(geometry, createCardMaterial(rendered.texture)); mesh.userData.cardId = placement.cardId; controller.cards.add(mesh); controller.meshes.set(placement.cardId, mesh); }
+      const existingShadow = controller.shadowMeshes.get(placement.cardId);
+      if (existingShadow) {
+        existingShadow.geometry.dispose();
+        existingShadow.geometry = shadowGeometry;
+        setShadowMaterialTexture(existingShadow.material, rendered.texture);
+      } else {
+        const shadow = new THREE.Mesh(shadowGeometry, createShadowMaterial(rendered.texture));
+        shadow.userData.cardId = placement.cardId;
+        controller.shadows.add(shadow);
+        controller.shadowMeshes.set(placement.cardId, shadow);
+      }
       controller.cache.get(placement.cardId)?.texture.dispose();
       controller.cache.set(placement.cardId, { key, texture: rendered.texture, aspect: rendered.aspect });
     }));
