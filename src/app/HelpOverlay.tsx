@@ -23,9 +23,10 @@ const guides = [
     summary: "Style one representative post.",
     items: [
       ["Shared template", "Every design edit updates all comments and both aspect ratios."],
+      ["Post setup", "Switch the shared text-post layout between X / Twitter, Instagram, and Facebook. The same imported copy and visibility controls drive all three."],
       ["Visibility", "Hide avatar, name, handle, timestamp, or engagement without changing the imported copy."],
       ["Surface", "Card opacity affects the fill only. Stroke width and color create the border."],
-      ["Scene depth", "Soft shadow adds a depth-aware shadow layer behind every card. Card lighting adds ambient, directional, and edge light without rebuilding card textures."],
+      ["Scene depth", "Soft shadow and card lighting add depth without rebuilding textures. Optional card wobble bends a subdivided WebGPU card from absolute time, with stable per-card variation."],
     ],
   },
   {
@@ -33,8 +34,9 @@ const guides = [
     title: "Animate",
     summary: "Shape motion at the shared and shot level.",
     items: [
-      ["Shared entrance", "The path and transform curve are reused by every ordinary card; trigger times remain take-specific."],
-      ["Shared exit", "The Out workspace has its own line, timing curve, fade, blur, scale, rotation, and depth. Choose one shared line or seeded scattered lines."],
+      ["Shared entrance", "The authored line is reused by every ordinary card; Path variation gives each card a deterministic variation while trigger times stay take-specific."],
+      ["Shared exit", "The Out workspace has its own line, timing curve, fade, blur, scale, rotation, and depth. Choose shared or scattered lines, then vary them per card."],
+      ["Background plate", "Field → Background plate loads an image or MP4 under the cards. MP4 plates follow the shot playhead and loop if they are shorter than the take. Toggle visibility, opacity, fit, and whether the plate is included in PNG export."],
       ["Multi-screen field", "Layout → Multi-screen field. Use Vertical 1×3 for one column of screens, then Animate → Camera to pan."],
       ["Move the camera", "Animate → Camera. Drag the field map, or use Pan X / Pan Y / Dolly, then Add keyframe at the playhead."],
       ["Transparent PNG export", "Check Alpha next to Export PNGs to write cards over a clear plate with no background."],

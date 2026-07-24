@@ -1,13 +1,16 @@
 ﻿import type { Dispatch, RefObject, SetStateAction } from "react";
 import {
-  Camera, CircleDot, Clapperboard, Download, FileUp, Heart, ImagePlus, Layers3, Lock, MousePointer2,
+  Camera, CircleDot, Clapperboard, Download, Eye, EyeOff, FileUp, Heart, ImagePlus, Layers3, Lock, MousePointer2,
   Move3d, Palette, RefreshCw, Shield, Sparkles, Trash2, Unlock, WandSparkles,
 } from "lucide-react";
 import { useState } from "react";
 import {
   alignCardPlacements,
   distributeCardPlacements,
+  EVEN_ARRIVAL_EASING,
   heroEndTime,
+  PUNCH_EARLY_ARRIVAL_EASING,
+  RAMP_UP_ARRIVAL_EASING,
   regenerateComposition,
   type AlignMode,
   type BuildOrder,
@@ -127,7 +130,7 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
   const finalBurstLifeMax = take.population.postHeroLifeMax ?? take.population.lifeMax;
   const finalBurstExitDuration = take.population.postHeroExitDuration ?? take.population.exitDuration;
   const finalBurstEasing = take.population.postHeroBurstEasing ?? { x1: 0, y1: 0, x2: 1, y2: 1 };
-  const finalBurstStartTime = take.hero ? heroEndTime(take.hero) : (take.population.postHeroBurstStartTime ?? Math.max(0, duration - 2));
+  const finalBurstStartTime = take.population.postHeroBurstStartTime ?? (take.hero ? heroEndTime(take.hero) : Math.max(0, duration - 2));
 
   function applyFieldBounds(width: number, height: number) {
     mutateProject((draft) => {
@@ -182,9 +185,37 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
           <p className="empty-copy">Edit one representative post and propagate it throughout every composition.</p>
           <button className="accent-button wide" onClick={() => setWorkspace("design")}><Palette size={16} />Open Design workspace</button>
         </PanelSection>
-        <PanelSection title="Background">
-          <div className="inline-controls"><Field label="Color" type="color" value={composition.backgroundColor} onChange={(event) => mutateComposition((draft) => { draft.backgroundColor = event.target.value; })} />
-            <label className="secondary-button file-button"><ImagePlus size={16} />Image<input hidden type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && loadBackground(event.target.files[0])} /></label></div>
+        <PanelSection title="Background plate" meta={composition.backgroundPlate ? "Loaded" : "None"}>
+          <div className="inline-controls"><Field label="Underlay color" type="color" value={composition.backgroundColor} onChange={(event) => mutateComposition((draft) => { draft.backgroundColor = event.target.value; })} />
+            <label className="secondary-button file-button"><ImagePlus size={16} />Load image / MP4<input hidden type="file" accept="image/png,image/jpeg,image/webp,image/avif,video/mp4,.mp4" onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) loadBackground(file);
+              event.currentTarget.value = "";
+            }} /></label></div>
+          {composition.backgroundPlate && <>
+            <div className="background-plate-summary">
+              {composition.backgroundPlate.mediaType === "video"
+                ? <video src={composition.backgroundPlate.source} muted playsInline preload="metadata" aria-label="MP4 plate preview" />
+                : <img src={composition.backgroundPlate.source} alt="" />}
+              <div><strong>{composition.backgroundPlate.name}</strong><span>{composition.backgroundPlate.mediaType === "video" ? "MP4" : "Image"} · {composition.backgroundPlate.fit} · {Math.round(composition.backgroundPlate.opacity * 100)}%</span></div>
+              <button className={`icon-button ${composition.backgroundPlate.visible ? "is-active" : ""}`} aria-label={composition.backgroundPlate.visible ? "Hide background plate" : "Show background plate"} title={composition.backgroundPlate.visible ? "Hide background plate" : "Show background plate"} onClick={() => mutateComposition((draft) => {
+                if (draft.backgroundPlate) draft.backgroundPlate.visible = !draft.backgroundPlate.visible;
+              })}>{composition.backgroundPlate.visible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+              <button className="icon-button danger-icon" aria-label="Remove background plate" title="Remove background plate" onClick={() => mutateComposition((draft) => { delete draft.backgroundPlate; })}><Trash2 size={16} /></button>
+            </div>
+            <Slider aria-label="Plate opacity" label="Plate opacity" min={0} max={1} step={0.01} value={composition.backgroundPlate.opacity} display={`${Math.round(composition.backgroundPlate.opacity * 100)}%`} disabled={!composition.backgroundPlate.visible} onChange={(event) => mutateComposition((draft) => {
+              if (draft.backgroundPlate) draft.backgroundPlate.opacity = Number(event.target.value);
+            })} />
+            <SelectField aria-label="Plate fit" label="Plate fit" value={composition.backgroundPlate.fit} disabled={!composition.backgroundPlate.visible} onChange={(event) => mutateComposition((draft) => {
+              if (draft.backgroundPlate) draft.backgroundPlate.fit = event.target.value as "cover" | "contain" | "stretch";
+            })}><option value="cover">Fill frame · crop</option><option value="contain">Fit whole plate</option><option value="stretch">Stretch to frame</option></SelectField>
+            {styleToggle("Include plate in export", composition.backgroundPlate.includeInExport, (includeInExport) => mutateComposition((draft) => {
+              if (draft.backgroundPlate) draft.backgroundPlate.includeInExport = includeInExport;
+            }))}
+            <p className="panel-note">{composition.backgroundPlate.includeInExport
+              ? `${composition.backgroundPlate.mediaType === "video" ? "The MP4 follows the shot playhead and loops when shorter than the take. It" : "The plate"} appears in live view, RAM preview, and PNG export.`
+              : `Reference only: ${composition.backgroundPlate.mediaType === "video" ? "the MP4 follows the shot playhead and appears" : "the plate appears"} while authoring and in RAM preview, but PNG export uses the underlay color or Alpha setting.`}</p>
+          </>}
         </PanelSection>
         <PanelSection title="Compositions" meta="Shared copy + design">
           <div className="composition-list">{project.compositions.map((item) => <button key={item.id} className={item.id === composition.id ? "is-active" : ""} onClick={() => switchComposition(item.id)}><span>{item.name}</span><small>{item.width} × {item.height}</small></button>)}</div>
@@ -379,82 +410,87 @@ export function FieldWorkspace(props: FieldWorkspaceProps) {
             display={`${Math.round(take.build.staggerEnd * composition.frameRate)}f`}
             onChange={(event) => updateBuild("staggerEnd", Number(event.target.value) / composition.frameRate)}
           />
+          <div className="population-curve-label"><strong>Arrival ramp</strong><span>Stagger density</span></div>
+          <CurveEditor curve={take.build.staggerEasing ?? EVEN_ARRIVAL_EASING} onChange={(staggerEasing) => updateBuild("staggerEasing", staggerEasing)} />
+          <div className="curve-presets">
+            <button type="button" onClick={() => updateBuild("staggerEasing", { ...RAMP_UP_ARRIVAL_EASING })}>Ramp up</button>
+            <button type="button" onClick={() => updateBuild("staggerEasing", { ...EVEN_ARRIVAL_EASING })}>Even</button>
+            <button type="button" onClick={() => updateBuild("staggerEasing", { ...PUNCH_EARLY_ARRIVAL_EASING })}>Punch early</button>
+          </div>
+          <p className="panel-note">Same shape language as motion eases: ease-in (below the diagonal) starts sparse and accelerates; ease-out punches early.</p>
           <button className="accent-button wide" onClick={() => { setWorkspace("animate"); setAnimateTab("entrance"); }}><Clapperboard size={16} />Edit entrance template</button>
           <button className="secondary-button wide" onClick={randomizeBuild}><Sparkles size={16} />Randomize triggers</button>
           <button className={`record-button wide ${mode === "record" ? "is-recording" : ""}`} onClick={() => { setMode(mode === "record" ? "select" : "record"); pausePlayback(); }}><CircleDot size={16} />{mode === "record" ? "Recording: draw in viewer" : "Record mouse build"}</button>
         </PanelSection>
-        <PanelSection title="Tweet population" meta={take.population.enabled ? "Living field" : "Single build"}>
-          <p className="panel-explainer">Give each post a deterministic life: enter, drift, leave, wait, and return. The same seed always produces the same performance.</p>
-          {styleToggle("Continuous field", take.population.enabled, (enabled) => mutateTake((draft) => { draft.population.enabled = enabled; }))}
-          <button className="accent-button wide" onClick={() => mutateTake((draft) => {
-            Object.assign(draft.population, {
-              enabled: true,
-              initialPopulation: 0.35,
-              lifeMin: 1.8,
-              lifeMax: 4.5,
-              gapMin: 0.45,
-              gapMax: 1.35,
-              exitDuration: 0.45,
-              wanderAmount: 0.025,
-              scaleVariation: 0.04,
-              depthVariation: 1.2,
-              exitDistance: 0.32,
-              postHeroBurst: 0.9,
-              postHeroBurstDuration: 0.5,
-              postHeroBurstEasing: { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 },
-              postHeroEntranceDuration: 1 / 3,
-              postHeroLifeMin: 0.75,
-              postHeroLifeMax: 1.5,
-              postHeroExitDuration: 1 / 3,
-            });
-          })}><Sparkles size={16} />Apply client-note preset</button>
-          <button className="secondary-button wide" onClick={() => { setWorkspace("animate"); setAnimateTab("exit"); }}><Clapperboard size={16} />Edit out animation</button>
+        <PanelSection title="Tweet population" meta={take.population.enabled ? (take.population.respawn ? "Churning field" : "Enter · hold · out") : "Single build"}>
+          <p className="panel-explainer">All motion is inside the take Out ({Math.round(duration * composition.frameRate)}f). Cards enter, hold, then play the shared out once. The final burst is a separate reserved wave on the curve.</p>
+          {styleToggle("Continuous field", take.population.enabled, (enabled) => mutateTake((draft) => {
+            draft.population.enabled = enabled;
+            if (enabled) draft.population.respawn = false;
+          }))}
           {take.population.enabled && <>
-            <Field label="Population seed" value={take.population.seed} onChange={(event) => mutateTake((draft) => { draft.population.seed = event.target.value; })} />
             <Slider label="Visible at start" min={0} max={1} step={0.05} value={take.population.initialPopulation} display={`${Math.round(take.population.initialPopulation * 100)}%`} onChange={(event) => mutateTake((draft) => { draft.population.initialPopulation = Number(event.target.value); })} />
-            <Slider label="Shortest life" min={6} max={Math.round(8 * composition.frameRate)} step={1} value={Math.round(take.population.lifeMin * composition.frameRate)} display={`${Math.round(take.population.lifeMin * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.lifeMin = Number(event.target.value) / composition.frameRate; })} />
-            <Slider label="Longest life" min={12} max={Math.round(12 * composition.frameRate)} step={1} value={Math.round(take.population.lifeMax * composition.frameRate)} display={`${Math.round(take.population.lifeMax * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.lifeMax = Number(event.target.value) / composition.frameRate; })} />
-            <Slider label="Shortest gap" min={0} max={Math.round(4 * composition.frameRate)} step={1} value={Math.round(take.population.gapMin * composition.frameRate)} display={`${Math.round(take.population.gapMin * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.gapMin = Number(event.target.value) / composition.frameRate; })} />
-            <Slider label="Longest gap" min={0} max={Math.round(6 * composition.frameRate)} step={1} value={Math.round(take.population.gapMax * composition.frameRate)} display={`${Math.round(take.population.gapMax * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.gapMax = Number(event.target.value) / composition.frameRate; })} />
-            <Slider label="Exit duration" min={3} max={Math.round(2 * composition.frameRate)} step={1} value={Math.round(take.population.exitDuration * composition.frameRate)} display={`${Math.round(take.population.exitDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.exitDuration = Number(event.target.value) / composition.frameRate; })} />
+            <Slider label="Hold on screen" min={6} max={Math.round(12 * composition.frameRate)} step={1} value={Math.round(((take.population.lifeMin + take.population.lifeMax) / 2) * composition.frameRate)} display={`${Math.round(((take.population.lifeMin + take.population.lifeMax) / 2) * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => {
+              const hold = Number(event.target.value) / composition.frameRate;
+              draft.population.lifeMin = hold * 0.85;
+              draft.population.lifeMax = hold * 1.15;
+            })} />
+            <Slider label="Out duration" min={3} max={Math.round(2 * composition.frameRate)} step={1} value={Math.round(take.population.exitDuration * composition.frameRate)} display={`${Math.round(take.population.exitDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.exitDuration = Number(event.target.value) / composition.frameRate; })} />
+            <button className="secondary-button wide" onClick={() => { setWorkspace("animate"); setAnimateTab("exit"); }}><Clapperboard size={16} />Edit out animation</button>
             <Slider label="Wander" min={0} max={0.12} step={0.0025} value={take.population.wanderAmount} display={`${(take.population.wanderAmount * 100).toFixed(1)}%`} onChange={(event) => mutateTake((draft) => { draft.population.wanderAmount = Number(event.target.value); })} />
-            <Slider label="Card size jitter" min={0} max={0.6} step={0.005} value={take.population.scaleVariation} display={`${Math.round(take.population.scaleVariation * 100)}%`} onChange={(event) => mutateTake((draft) => { draft.population.scaleVariation = Number(event.target.value); })} />
             <Slider label="Depth / apparent size" min={0} max={2.5} step={0.05} value={take.population.depthVariation} display={take.population.depthVariation.toFixed(2)} onChange={(event) => mutateTake((draft) => { draft.population.depthVariation = Number(event.target.value); })} />
-            <p className="panel-note">Cards stay close to the shared template size. Near/far Z now creates most of the apparent size difference.</p>
-            <Slider label="Exit distance" min={0} max={1.2} step={0.025} value={take.population.exitDistance} display={take.population.exitDistance.toFixed(2)} onChange={(event) => mutateTake((draft) => { draft.population.exitDistance = Number(event.target.value); })} />
+            <details className="subtle-details">
+              <summary>Field churn · advanced</summary>
+              <p className="panel-note">Re-entry makes cards leave and return mid-shot after their out. Keep off when dialing the ending ramp.</p>
+              {styleToggle("Allow mid-shot re-entry", take.population.respawn === true, (respawn) => mutateTake((draft) => { draft.population.respawn = respawn; }))}
+              <Field label="Population seed" value={take.population.seed} onChange={(event) => mutateTake((draft) => { draft.population.seed = event.target.value; })} />
+              <Slider label="Shortest life" min={6} max={Math.round(8 * composition.frameRate)} step={1} value={Math.round(take.population.lifeMin * composition.frameRate)} display={`${Math.round(take.population.lifeMin * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.lifeMin = Number(event.target.value) / composition.frameRate; })} />
+              <Slider label="Longest life" min={12} max={Math.round(12 * composition.frameRate)} step={1} value={Math.round(take.population.lifeMax * composition.frameRate)} display={`${Math.round(take.population.lifeMax * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.lifeMax = Number(event.target.value) / composition.frameRate; })} />
+              <Slider label="Shortest gap" min={0} max={Math.round(4 * composition.frameRate)} step={1} value={Math.round(take.population.gapMin * composition.frameRate)} display={`${Math.round(take.population.gapMin * composition.frameRate)}f`} disabled={take.population.respawn !== true} onChange={(event) => mutateTake((draft) => { draft.population.gapMin = Number(event.target.value) / composition.frameRate; })} />
+              <Slider label="Longest gap" min={0} max={Math.round(6 * composition.frameRate)} step={1} value={Math.round(take.population.gapMax * composition.frameRate)} display={`${Math.round(take.population.gapMax * composition.frameRate)}f`} disabled={take.population.respawn !== true} onChange={(event) => mutateTake((draft) => { draft.population.gapMax = Number(event.target.value) / composition.frameRate; })} />
+              <Slider label="Card size jitter" min={0} max={0.6} step={0.005} value={take.population.scaleVariation} display={`${Math.round(take.population.scaleVariation * 100)}%`} onChange={(event) => mutateTake((draft) => { draft.population.scaleVariation = Number(event.target.value); })} />
+              <Slider label="Exit distance" min={0} max={1.2} step={0.025} value={take.population.exitDistance} display={take.population.exitDistance.toFixed(2)} onChange={(event) => mutateTake((draft) => { draft.population.exitDistance = Number(event.target.value); })} />
+            </details>
           </>}
         </PanelSection>
-        <PanelSection title="Final burst" meta={take.hero ? `Hero end · ${Math.round(finalBurstStartTime * composition.frameRate)}f` : `Manual · ${Math.round(finalBurstStartTime * composition.frameRate)}f`}>
-          <p className="panel-explainer">Give the ending its own denser, faster performance. The bias curve redistributes arrivals inside the selected window.</p>
-          <button className="accent-button wide" onClick={() => mutateTake((draft) => {
-            Object.assign(draft.population, {
-              enabled: true,
-              postHeroBurst: 0.95,
-              postHeroBurstStartTime: Math.max(0, draft.duration - 2),
-              postHeroBurstDuration: 10 / composition.frameRate,
-              postHeroBurstEasing: { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 },
-              postHeroEntranceDuration: 8 / composition.frameRate,
-              postHeroLifeMin: 18 / composition.frameRate,
-              postHeroLifeMax: 36 / composition.frameRate,
-              postHeroExitDuration: 8 / composition.frameRate,
-            });
-          })}><Sparkles size={16} />Apply fast-ending preset</button>
-          <button className="secondary-button wide" onClick={() => { pausePlayback(); onTimeChange(Math.max(0, finalBurstStartTime - 0.5)); }}><Clapperboard size={16} />Cue final burst</button>
-          <Slider label="Burst start" min={0} max={Math.round(duration * composition.frameRate)} step={1} value={Math.round(finalBurstStartTime * composition.frameRate)} display={`${Math.round(finalBurstStartTime * composition.frameRate)}f`} disabled={Boolean(take.hero)} onChange={(event) => mutateTake((draft) => { draft.population.postHeroBurstStartTime = Number(event.target.value) / composition.frameRate; })} />
-          <Slider label="Burst amount" min={0} max={1} step={0.05} value={take.population.postHeroBurst} display={`${Math.round(take.population.postHeroBurst * 100)}%`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroBurst = Number(event.target.value); })} />
-          <Slider label="Arrival window" min={1} max={Math.round(4 * composition.frameRate)} step={1} value={Math.round(take.population.postHeroBurstDuration * composition.frameRate)} display={`${Math.round(take.population.postHeroBurstDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroBurstDuration = Number(event.target.value) / composition.frameRate; })} />
-          <Slider label="Build duration" min={2} max={Math.round(2 * composition.frameRate)} step={1} value={Math.round(finalBurstEntranceDuration * composition.frameRate)} display={`${Math.round(finalBurstEntranceDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroEntranceDuration = Number(event.target.value) / composition.frameRate; })} />
-          <Slider label="Shortest burst life" min={4} max={Math.round(6 * composition.frameRate)} step={1} value={Math.round(finalBurstLifeMin * composition.frameRate)} display={`${Math.round(finalBurstLifeMin * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroLifeMin = Math.min(Number(event.target.value) / composition.frameRate, draft.population.postHeroLifeMax ?? draft.population.lifeMax); })} />
-          <Slider label="Longest burst life" min={6} max={Math.round(8 * composition.frameRate)} step={1} value={Math.round(finalBurstLifeMax * composition.frameRate)} display={`${Math.round(finalBurstLifeMax * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroLifeMax = Math.max(Number(event.target.value) / composition.frameRate, draft.population.postHeroLifeMin ?? draft.population.lifeMin); })} />
-          <Slider label="Burst exit duration" min={2} max={Math.round(2 * composition.frameRate)} step={1} value={Math.round(finalBurstExitDuration * composition.frameRate)} display={`${Math.round(finalBurstExitDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroExitDuration = Number(event.target.value) / composition.frameRate; })} />
-          <div className="population-curve-label"><strong>Arrival bias</strong><span>Weighted delay</span></div>
-          <CurveEditor curve={finalBurstEasing} onChange={(postHeroBurstEasing) => mutateTake((draft) => { draft.population.postHeroBurstEasing = postHeroBurstEasing; })} />
+        <PanelSection title="Final burst" meta={`Start · ${Math.round(finalBurstStartTime * composition.frameRate)}f / ${Math.round(duration * composition.frameRate)}f`}>
+          <p className="panel-explainer">One reserved ending wave inside the {Math.round(duration * composition.frameRate)}f shot. Start + curve control the ramp; cards held for the burst do not appear earlier, so the density change is clean.</p>
+          <button className="secondary-button wide" onClick={() => { pausePlayback(); onTimeChange(Math.max(0, finalBurstStartTime - 0.5)); }}><Clapperboard size={16} />Jump to burst</button>
+          {take.hero && <button className="secondary-button wide" onClick={() => mutateTake((draft) => {
+            if (draft.hero) draft.population.postHeroBurstStartTime = heroEndTime(draft.hero);
+          })}><Sparkles size={16} />Align to hero end</button>}
+          <Slider label="Burst start" min={0} max={Math.round(duration * composition.frameRate)} step={1} value={Math.round(finalBurstStartTime * composition.frameRate)} display={`${Math.round(finalBurstStartTime * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => {
+            draft.population.enabled = true;
+            draft.population.postHeroBurstStartTime = Number(event.target.value) / composition.frameRate;
+            if (draft.population.postHeroBurst <= 0) draft.population.postHeroBurst = 0.9;
+          })} />
+          <div className="population-curve-label"><strong>Arrival curve</strong><span>Density over the window</span></div>
+          <CurveEditor curve={finalBurstEasing} onChange={(postHeroBurstEasing) => mutateTake((draft) => {
+            draft.population.enabled = true;
+            draft.population.postHeroBurstEasing = postHeroBurstEasing;
+            if (draft.population.postHeroBurst <= 0) draft.population.postHeroBurst = 0.9;
+          })} />
           <div className="curve-presets">
-            <button onClick={() => mutateTake((draft) => { draft.population.postHeroBurstEasing = { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 }; })}>Front-load</button>
-            <button onClick={() => mutateTake((draft) => { draft.population.postHeroBurstEasing = { x1: 0, y1: 0, x2: 1, y2: 1 }; })}>Even</button>
-            <button onClick={() => mutateTake((draft) => { draft.population.postHeroBurstEasing = { x1: 0.15, y1: 0.75, x2: 0.45, y2: 1 }; })}>Back-load</button>
+            <button type="button" onClick={() => mutateTake((draft) => { draft.population.postHeroBurstEasing = { ...RAMP_UP_ARRIVAL_EASING }; })}>Ramp up</button>
+            <button type="button" onClick={() => mutateTake((draft) => { draft.population.postHeroBurstEasing = { ...EVEN_ARRIVAL_EASING }; })}>Even</button>
+            <button type="button" onClick={() => mutateTake((draft) => { draft.population.postHeroBurstEasing = { ...PUNCH_EARLY_ARRIVAL_EASING }; })}>Punch early</button>
           </div>
-          <p className="panel-note">{take.hero ? "The burst follows the hero’s final key automatically." : "No hero is assigned, so the burst uses the manual start frame above."} Cue it, then play through the arrival window to judge the curve.</p>
+          <Slider label="Arrival window" min={1} max={Math.round(4 * composition.frameRate)} step={1} value={Math.round(Math.max(1 / composition.frameRate, take.population.postHeroBurstDuration) * composition.frameRate)} display={`${Math.round(Math.max(1 / composition.frameRate, take.population.postHeroBurstDuration) * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroBurstDuration = Number(event.target.value) / composition.frameRate; })} />
+          <p className="panel-note">Purple diamond = start. Bracket handle = end of the arrival window. Density ticks preview the curve. This is a single wave — cards do not re-burst after it.</p>
+          <details className="subtle-details">
+            <summary>Art direction · optional</summary>
+            <Slider label="How many join" min={0} max={1} step={0.05} value={take.population.postHeroBurst} display={`${Math.round(take.population.postHeroBurst * 100)}%`} onChange={(event) => mutateTake((draft) => {
+              draft.population.enabled = true;
+              draft.population.postHeroBurst = Number(event.target.value);
+            })} />
+            <Slider label="Entrance snap" min={2} max={Math.round(2 * composition.frameRate)} step={1} value={Math.round(finalBurstEntranceDuration * composition.frameRate)} display={`${Math.round(finalBurstEntranceDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroEntranceDuration = Number(event.target.value) / composition.frameRate; })} />
+            <Slider label="Hold on screen" min={6} max={Math.round(10 * composition.frameRate)} step={1} value={Math.round(((finalBurstLifeMin + finalBurstLifeMax) / 2) * composition.frameRate)} display={`${Math.round(((finalBurstLifeMin + finalBurstLifeMax) / 2) * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => {
+              const hold = Number(event.target.value) / composition.frameRate;
+              draft.population.postHeroLifeMin = hold * 0.85;
+              draft.population.postHeroLifeMax = hold * 1.15;
+            })} />
+            <Slider label="Fade out" min={2} max={Math.round(2 * composition.frameRate)} step={1} value={Math.round(finalBurstExitDuration * composition.frameRate)} display={`${Math.round(finalBurstExitDuration * composition.frameRate)}f`} onChange={(event) => mutateTake((draft) => { draft.population.postHeroExitDuration = Number(event.target.value) / composition.frameRate; })} />
+          </details>
         </PanelSection>
         {take.gestureSamples.length > 0 && <PanelSection title="Recorded path" meta={selectedGestureIndex === null ? `${take.gestureSamples.length} points` : `Point ${selectedGestureIndex + 1}/${take.gestureSamples.length}`}>
           <p className="panel-explainer">Tap a point in the viewer or its diamond in the timeline, then art-direct its screen position and arrival time.</p>

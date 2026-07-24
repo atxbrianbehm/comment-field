@@ -279,6 +279,15 @@ export function ExitWorkspace({
             <option value="scatter">Scattered lines</option>
             <option value="shared">Shared line</option>
           </SelectField>
+          <Slider
+            label="Path variation"
+            min={0}
+            max={0.4}
+            step={0.005}
+            value={motion.pathVariation}
+            display={`${Math.round(motion.pathVariation * 100)}%`}
+            onChange={(event) => onPopulationChange({ ...population, exitMotion: { ...motion, pathVariation: Number(event.target.value) } })}
+          />
           {isScatter ? <>
             <Slider label="Travel distance" min={0.02} max={1.2} step={0.025} value={population.exitDistance} display={population.exitDistance.toFixed(2)} onChange={(event) => setScatterDistance(Number(event.target.value))} />
             <p className="panel-note">Each card gets a seeded line. Drag any spline point to promote this representative path into an editable shared line.</p>

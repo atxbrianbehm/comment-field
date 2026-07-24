@@ -374,6 +374,7 @@ export function App() {
         onStyleChange={(key, value) => mutateProject((draft) => { Object.assign(draft.cardStyle, { [key]: value }); })}
         onSceneShadowChange={(key, value) => mutateProject((draft) => { Object.assign(draft.renderSettings.sceneShadow, { [key]: value }); })}
         onCardLightingChange={(key, value) => mutateProject((draft) => { Object.assign(draft.renderSettings.cardLighting, { [key]: value }); })}
+        onCardWobbleChange={(key, value) => mutateProject((draft) => { Object.assign(draft.renderSettings.cardWobble, { [key]: value }); })}
         onBack={() => setWorkspace("field")}
       />}
       {workspace === "animate" && (
@@ -442,7 +443,7 @@ export function App() {
       <footer className="transport">
         <button className="play-button" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"}><span className={playing ? "icon-state visible" : "icon-state"}><Pause size={18} /></span><span className={!playing ? "icon-state visible play-icon" : "icon-state play-icon"}><Play size={18} /></span></button>
         <div className="timecode">{formatFrameRange(time, duration, composition.frameRate)}{cachedPlaybackActive && <em>RAM</em>}</div>
-        <KeyframeTimeline take={take} frameRate={composition.frameRate} time={time} previewProgress={previewProgress} expanded={workspace === "animate"} autoKey={autoKey} selectedGestureIndex={selectedGestureIndex} onGestureSelect={setSelectedGestureIndex} onGestureChange={updateGestureSample} onAutoKeyChange={setAutoKey} onTimeChange={scrubTo} onDurationChange={changeTakeDuration} onCameraChange={(cameraKeyframes) => mutateTake((draft) => { draft.cameraKeyframes = cameraKeyframes; })} onHeroChange={(keyframes) => mutateTake((draft) => { if (draft.hero) draft.hero.keyframes = keyframes; })} />
+        <KeyframeTimeline take={take} frameRate={composition.frameRate} time={time} previewProgress={previewProgress} expanded={workspace === "animate"} autoKey={autoKey} selectedGestureIndex={selectedGestureIndex} onGestureSelect={setSelectedGestureIndex} onGestureChange={updateGestureSample} onAutoKeyChange={setAutoKey} onTimeChange={scrubTo} onDurationChange={changeTakeDuration} onCameraChange={(cameraKeyframes) => mutateTake((draft) => { draft.cameraKeyframes = cameraKeyframes; })} onHeroChange={(keyframes) => mutateTake((draft) => { if (draft.hero) draft.hero.keyframes = keyframes; })} onPopulationChange={(patch) => mutateTake((draft) => { Object.assign(draft.population, patch); })} />
         <div className="take-controls">
           <IconButton label={take.favorite ? "Unfavorite take" : "Favorite take"} active={take.favorite} onClick={() => mutateTake((draft) => { draft.favorite = !draft.favorite; })}><Star size={15} fill={take.favorite ? "currentColor" : "none"} /></IconButton>
           <input className="take-name" value={take.name} onChange={(event) => mutateTake((draft) => { draft.name = event.target.value; })} aria-label="Take name" />

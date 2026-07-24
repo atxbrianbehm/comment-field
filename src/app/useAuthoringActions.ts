@@ -225,7 +225,11 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
       easing: "ease-out",
       reflowEasing: "ease-out",
     };
-    mutateTake((draft) => { draft.hero = hero; draft.reflowTargets = {}; });
+    mutateTake((draft) => {
+      draft.hero = hero;
+      draft.population.postHeroBurstStartTime = startTime + 1.2;
+      draft.reflowTargets = {};
+    });
     setRightTab("hero");
     setWorkspace("animate");
     setAnimateTab("hero");
@@ -326,8 +330,28 @@ export function useAuthoringActions(input: AuthoringActionsInput) {
   }
 
   function loadBackground(file: File) {
+    const mediaType = file.type === "video/mp4" || file.name.toLowerCase().endsWith(".mp4") ? "video" : "image";
+    if (mediaType === "image" && !file.type.startsWith("image/")) {
+      setNotice("Choose an image or MP4 background plate");
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = () => mutateComposition((draft) => { draft.backgroundImage = String(reader.result); });
+    reader.onload = () => {
+      mutateComposition((draft) => {
+        const previous = draft.backgroundPlate;
+        draft.backgroundPlate = {
+          source: String(reader.result),
+          name: file.name,
+          mediaType,
+          visible: true,
+          opacity: previous?.opacity ?? 1,
+          fit: previous?.fit ?? "cover",
+          includeInExport: previous?.includeInExport ?? false,
+        };
+      });
+      setNotice(`Loaded ${mediaType === "video" ? "MP4" : "image"} plate · ${file.name}`);
+    };
+    reader.onerror = () => setNotice("Could not load background plate");
     reader.readAsDataURL(file);
   }
 

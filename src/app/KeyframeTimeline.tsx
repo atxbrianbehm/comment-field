@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, ChevronDown, ChevronUp, CircleDot, Minus, Plus, Sparkles } from "lucide-react";
-import { moveKeyframe, snapTime, type CameraKeyframe, type GestureSample, type HeroKeyframe, type Take } from "@comment-field/engine";
+import { Camera, ChevronDown, ChevronUp, CircleDot, Minus, Plus, Sparkles, Zap } from "lucide-react";
+import {
+  EVEN_ARRIVAL_EASING,
+  invertBezierCurve,
+  moveKeyframe,
+  snapTime,
+  type CameraKeyframe,
+  type CardPopulationSettings,
+  type GestureSample,
+  type HeroKeyframe,
+  type Take,
+} from "@comment-field/engine";
 
 interface KeyframeTimelineProps {
   take: Take;
@@ -17,6 +27,7 @@ interface KeyframeTimelineProps {
   onDurationChange: (duration: number) => void;
   onCameraChange: (keyframes: CameraKeyframe[]) => void;
   onHeroChange: (keyframes: HeroKeyframe[]) => void;
+  onPopulationChange: (patch: Partial<CardPopulationSettings>) => void;
 }
 
 /** Absolute frame index from time (seconds), rounded to the nearest frame. */
@@ -69,6 +80,10 @@ function frameTickStep(frameRate: number, pixelsPerFrame: number) {
   return frameRate;
 }
 
+function durationToWidth(duration: number, frameRate: number, pixelsPerFrame: number) {
+  return Math.max(pixelsPerFrame, timeToFrame(Math.max(0, duration), frameRate) * pixelsPerFrame);
+}
+
 export function KeyframeTimeline(props: KeyframeTimelineProps) {
   const { take, frameRate, time, previewProgress, expanded, autoKey } = props;
   const [pixelsPerFrame, setPixelsPerFrame] = useState(4);
@@ -77,16 +92,28 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
   useEffect(() => setDurationFramesText(String(timeToFrame(take.duration, frameRate))), [take.id, take.duration, frameRate]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const heroKeys = take.hero?.keyframes ?? [];
-  const latestEvent = Math.max(
-    take.duration,
-    ...take.cameraKeyframes.map((keyframe) => keyframe.time),
-    ...heroKeys.map((keyframe) => keyframe.time),
-    ...take.gestureSamples.map((sample) => sample.time),
-    ...take.cardTriggers.map((trigger) => trigger.triggerTime),
-  );
-  const totalFrames = Math.max(1, timeToFrame(Math.max(take.duration + 1 / frameRate, latestEvent + 1 / frameRate), frameRate));
-  const durationFrames = timeToFrame(take.duration, frameRate);
-  const contentWidth = Math.max(520, totalFrames * pixelsPerFrame);
+  const burstEnabled = take.population.enabled && take.population.postHeroBurst > 0;
+  const rawBurstStart = Number.isFinite(take.population.postHeroBurstStartTime)
+    ? take.population.postHeroBurstStartTime
+    : Math.max(0, take.duration - 2);
+  // Keep the burst cue drawable inside the shot even if an old value was past Out.
+  const burstStart = Math.max(0, Math.min(take.duration, rawBurstStart));
+  const burstDuration = Math.max(1 / frameRate, take.population.postHeroBurstDuration || 0);
+  const burstEnd = Math.min(take.duration, burstStart + burstDuration);
+  const burstEasing = take.population.postHeroBurstEasing ?? EVEN_ARRIVAL_EASING;
+  const burstDensity = useMemo(() => {
+    const amount = Math.max(0, Math.min(1, take.population.postHeroBurst || 0));
+    const count = Math.max(1, Math.round(28 * Math.max(0.15, amount)));
+    return Array.from({ length: count }, (_, index) => (
+      invertBezierCurve(burstEasing, (index + 0.5) / Math.max(1, count))
+    ));
+  }, [take.population.postHeroBurst, burstEasing]);
+  // Timeline length IS the shot. One extra frame keeps the Out handle grabbable.
+  // Never expand from keys/triggers — that created multi-hundred-frame empty scrub ranges.
+  const durationFrames = Math.max(1, timeToFrame(take.duration, frameRate));
+  const totalFrames = durationFrames + 1;
+  const contentWidth = Math.max(320, totalFrames * pixelsPerFrame);
+  const maxScrubTime = take.duration;
   const tickStep = frameTickStep(frameRate, pixelsPerFrame);
   const ticks = useMemo(
     () => Array.from({ length: Math.floor(totalFrames / tickStep) + 1 }, (_, index) => index * tickStep),
@@ -100,11 +127,16 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
     return frameToTime(Math.round(frame), frameRate);
   }
 
-  function dragTime(event: React.PointerEvent, update: (time: number) => void) {
+  function dragTime(event: React.PointerEvent, update: (time: number) => void, options?: { clampToShot?: boolean; maxTime?: number }) {
     event.preventDefault();
     const target = event.currentTarget as HTMLElement;
     target.setPointerCapture(event.pointerId);
-    const move = (clientX: number) => update(timeAtPointer(clientX));
+    const clampToShot = options?.clampToShot !== false;
+    const ceiling = options?.maxTime ?? maxScrubTime;
+    const move = (clientX: number) => {
+      const raw = timeAtPointer(clientX);
+      update(clampToShot ? Math.max(0, Math.min(ceiling, raw)) : Math.max(0, raw));
+    };
     move(event.clientX);
     const onMove = (moveEvent: PointerEvent) => move(moveEvent.clientX);
     const onUp = () => {
@@ -117,13 +149,18 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
     target.addEventListener("pointercancel", onUp);
   }
 
+  function clampShotTime(nextTime: number) {
+    return Math.max(0, Math.min(maxScrubTime, nextTime));
+  }
+
   function dragKey(event: React.PointerEvent, kind: "camera" | "hero", id: string) {
     event.stopPropagation();
     setSelectedId(id);
     dragTime(event, (nextTime) => {
-      if (kind === "camera") props.onCameraChange(moveKeyframe(take.cameraKeyframes, id, nextTime, frameRate));
-      else props.onHeroChange(moveKeyframe(heroKeys, id, nextTime, frameRate));
-      props.onTimeChange(nextTime);
+      const time = clampShotTime(nextTime);
+      if (kind === "camera") props.onCameraChange(moveKeyframe(take.cameraKeyframes, id, time, frameRate));
+      else props.onHeroChange(moveKeyframe(heroKeys, id, time, frameRate));
+      props.onTimeChange(time);
     });
   }
 
@@ -131,8 +168,31 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
     event.stopPropagation();
     props.onGestureSelect(index);
     dragTime(event, (nextTime) => {
-      props.onGestureChange(index, { time: nextTime });
-      props.onTimeChange(nextTime);
+      const time = clampShotTime(nextTime);
+      props.onGestureChange(index, { time });
+      props.onTimeChange(time);
+    });
+  }
+
+  function dragBurstStart(event: React.PointerEvent) {
+    event.stopPropagation();
+    setSelectedId("burst-start");
+    dragTime(event, (nextTime) => {
+      const time = clampShotTime(nextTime);
+      props.onPopulationChange({ postHeroBurstStartTime: time });
+      props.onTimeChange(time);
+    });
+  }
+
+  function dragBurstEnd(event: React.PointerEvent) {
+    event.stopPropagation();
+    setSelectedId("burst-end");
+    dragTime(event, (nextTime) => {
+      // Window end can sit on Out; keep start fixed and size the arrival span inside the shot.
+      const end = clampShotTime(Math.max(burstStart + 1 / frameRate, nextTime));
+      const duration = Math.max(1 / frameRate, end - burstStart);
+      props.onPopulationChange({ postHeroBurstDuration: snapTime(duration, frameRate) });
+      props.onTimeChange(end);
     });
   }
 
@@ -145,6 +205,14 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
   function leftForTime(value: number) {
     return timeToFrame(value, frameRate) * pixelsPerFrame;
   }
+
+  const burstWindowStyle = {
+    left: leftForTime(burstStart),
+    width: durationToWidth(burstDuration, frameRate, pixelsPerFrame),
+  };
+  const burstStartLeft = leftForTime(burstStart);
+  const burstEndLeft = leftForTime(burstEnd);
+  const burstOverflow = burstStart > take.duration;
 
   return (
     <section className={`dopesheet ${expanded ? "is-expanded" : "is-compact"}`}>
@@ -176,10 +244,23 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
           <span>{pixelsPerFrame}px/f</span>
           <button onClick={() => setPixelsPerFrame((value) => Math.min(24, value + 1))} aria-label="Zoom timeline in"><Plus size={14} /></button>
         </div>
-        <span className="timeline-expand-label">{expanded ? <><ChevronDown size={14} />Camera + Hero</> : <><ChevronUp size={14} />Open Animate for tracks</>}</span>
+        <span className="timeline-expand-label">{expanded ? <><ChevronDown size={14} />Animation tracks</> : <><ChevronUp size={14} />Open Animate for tracks</>}</span>
       </header>
       <div className="dopesheet-body">
-        {expanded && <div className="dopesheet-labels"><div className="ruler-label">Tracks</div><div><Camera size={14} />Camera</div><div><Sparkles size={14} />Hero</div><div><CircleDot size={14} />Build path</div></div>}
+        {expanded ? (
+          <div className="dopesheet-labels">
+            <div className="ruler-label">Tracks</div>
+            <div><Camera size={14} />Camera</div>
+            <div><Sparkles size={14} />Hero</div>
+            <div><CircleDot size={14} />Build path</div>
+            <div className={burstEnabled ? "" : "is-muted"}><Zap size={14} />Final burst</div>
+          </div>
+        ) : (
+          <div className="dopesheet-labels dopesheet-labels-compact">
+            <div className="ruler-label">Time</div>
+            <div className={burstEnabled ? "" : "is-muted"}><Zap size={14} />Burst</div>
+          </div>
+        )}
         <div className="dopesheet-scroll" ref={scrollRef}>
           <div className="dopesheet-content" style={{ width: contentWidth }} onPointerDown={(event) => dragTime(event, props.onTimeChange)}>
             <div className="dopesheet-ruler">
@@ -194,9 +275,53 @@ export function KeyframeTimeline(props: KeyframeTimelineProps) {
               <div className="dopesheet-row hero-row">{heroKeys.map((keyframe) => <button key={keyframe.id} className={`key-diamond ${keyframe.value.kind === "source" ? "is-source" : ""} ${selectedId === keyframe.id ? "is-selected" : ""} ${keyframe.time > take.duration ? "is-overflow" : ""}`} style={{ left: leftForTime(keyframe.time) }} onPointerDown={(event) => dragKey(event, "hero", keyframe.id)} onClick={() => props.onTimeChange(keyframe.time)} aria-label={`Hero key at frame ${timeToFrame(keyframe.time, frameRate)}`} />)}</div>
               <div className="dopesheet-row gesture-row">{take.gestureSamples.map((sample, index) => <button key={`${index}-${sample.time}`} className={`key-diamond gesture-key ${props.selectedGestureIndex === index ? "is-selected" : ""} ${sample.time > take.duration ? "is-overflow" : ""}`} style={{ left: leftForTime(sample.time) }} onPointerDown={(event) => dragGesturePoint(event, index)} onClick={() => { props.onGestureSelect(index); props.onTimeChange(sample.time); }} aria-label={`Build path point ${index + 1} at frame ${timeToFrame(sample.time, frameRate)}`} />)}</div>
             </>}
-            {!expanded && take.gestureSamples.map((sample, index) => <button key={`${index}-${sample.time}`} className={`gesture-key-marker ${props.selectedGestureIndex === index ? "is-selected" : ""}`} style={{ left: leftForTime(sample.time) }} onPointerDown={(event) => dragGesturePoint(event, index)} onClick={() => { props.onGestureSelect(index); props.onTimeChange(sample.time); }} aria-label={`Build path point ${index + 1} at frame ${timeToFrame(sample.time, frameRate)}`} />)}
-            <div className="timeline-playhead" style={{ left: leftForTime(Math.min(time, take.duration + 1)) }}><i /></div>
-            <button className="shot-outpoint" style={{ left: leftForTime(take.duration) }} onPointerDown={(event) => dragTime(event, (next) => props.onDurationChange(Math.max(1 / frameRate, next)))} aria-label="Drag shot out point"><i /></button>
+            {/* Burst track is always visible (compact or expanded) so the start key is never buried. */}
+            <div className={`dopesheet-row burst-row ${expanded ? "burst-row-expanded" : "burst-row-compact"} ${burstEnabled ? "" : "is-disabled"}`}>
+              <div className="burst-window" style={burstWindowStyle}>
+                {burstDensity.map((position, index) => <i key={index} style={{ left: `${position * 100}%` }} />)}
+              </div>
+              <button
+                type="button"
+                className={`key-diamond burst-key ${selectedId === "burst-start" ? "is-selected" : ""} ${burstOverflow ? "is-overflow" : ""}`}
+                style={{ left: burstStartLeft }}
+                onPointerDown={dragBurstStart}
+                onClick={() => props.onTimeChange(burstStart)}
+                aria-label={`Final burst start at frame ${timeToFrame(burstStart, frameRate)}`}
+                title={`Burst start · ${timeToFrame(burstStart, frameRate)}f`}
+              />
+              <button
+                type="button"
+                className={`burst-end-handle ${selectedId === "burst-end" ? "is-selected" : ""}`}
+                style={{ left: burstEndLeft }}
+                onPointerDown={dragBurstEnd}
+                onClick={() => props.onTimeChange(burstEnd)}
+                aria-label={`Burst arrival window ends at frame ${timeToFrame(burstEnd, frameRate)}`}
+                title={`Arrival window end · ${timeToFrame(burstEnd, frameRate)}f`}
+              ><i /></button>
+            </div>
+            {!expanded && take.gestureSamples.map((sample, index) => (
+              <button
+                key={`${index}-${sample.time}`}
+                type="button"
+                className={`gesture-key-marker ${props.selectedGestureIndex === index ? "is-selected" : ""}`}
+                style={{ left: leftForTime(sample.time) }}
+                onPointerDown={(event) => dragGesturePoint(event, index)}
+                onClick={() => { props.onGestureSelect(index); props.onTimeChange(sample.time); }}
+                aria-label={`Build path point ${index + 1} at frame ${timeToFrame(sample.time, frameRate)}`}
+              />
+            ))}
+            <div className="timeline-playhead" style={{ left: leftForTime(Math.min(time, take.duration)) }}><i /></div>
+            <button
+              type="button"
+              className="shot-outpoint"
+              style={{ left: leftForTime(take.duration) }}
+              onPointerDown={(event) => dragTime(event, (next) => props.onDurationChange(Math.max(1 / frameRate, next)), {
+                // Out may extend the shot; allow dragging past the current end of the ruler.
+                clampToShot: false,
+                maxTime: Math.max(take.duration * 2, 30),
+              })}
+              aria-label="Drag shot out point"
+            ><i /></button>
           </div>
         </div>
       </div>

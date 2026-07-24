@@ -154,6 +154,15 @@ export function EntranceWorkspace({
             <option value="shared">Shared path</option>
             <option value="rain">Rain · bottom to top</option>
           </SelectField>
+          <Slider
+            label="Path variation"
+            min={0}
+            max={0.4}
+            step={0.005}
+            value={motion.pathVariation}
+            display={`${Math.round(motion.pathVariation * 100)}%`}
+            onChange={(event) => onMotionChange({ ...motion, pathVariation: Number(event.target.value) })}
+          />
           {isRain ? (
             <>
               <Slider

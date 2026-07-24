@@ -44,6 +44,7 @@ export function DesignWorkspace({
   onStyleChange,
   onSceneShadowChange,
   onCardLightingChange,
+  onCardWobbleChange,
   onBack,
 }: {
   comment: CommentRecord;
@@ -52,6 +53,7 @@ export function DesignWorkspace({
   onStyleChange: <K extends keyof CardStyle>(key: K, value: CardStyle[K]) => void;
   onSceneShadowChange: <K extends keyof RenderSettings["sceneShadow"]>(key: K, value: RenderSettings["sceneShadow"][K]) => void;
   onCardLightingChange: <K extends keyof RenderSettings["cardLighting"]>(key: K, value: RenderSettings["cardLighting"][K]) => void;
+  onCardWobbleChange: <K extends keyof RenderSettings["cardWobble"]>(key: K, value: RenderSettings["cardWobble"][K]) => void;
   onBack: () => void;
 }) {
   return (
@@ -68,6 +70,11 @@ export function DesignWorkspace({
       </div>
       <aside className="authoring-inspector panel-scroll">
         <PanelSection title="Card surface" meta="Shared globally">
+          <SelectField label="Post setup" value={style.postType} onChange={(event) => onStyleChange("postType", event.target.value as CardStyle["postType"])}>
+            <option value="x">X / Twitter</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+          </SelectField>
           <Field label="Card color" type="color" value={style.background} onChange={(event) => onStyleChange("background", event.target.value)} />
           <Slider label="Width" min={300} max={620} step={10} value={style.width} display={`${style.width}px`} onChange={(event) => onStyleChange("width", Number(event.target.value))} />
           <Slider label="Opacity" min={0.2} max={1} step={0.01} value={style.backgroundOpacity} onChange={(event) => onStyleChange("backgroundOpacity", Number(event.target.value))} />
@@ -92,6 +99,12 @@ export function DesignWorkspace({
             <Slider label="Key intensity" min={0} max={0.5} step={0.01} value={renderSettings.cardLighting.intensity} display={`${Math.round(renderSettings.cardLighting.intensity * 100)}%`} onChange={(event) => onCardLightingChange("intensity", Number(event.target.value))} />
             <Slider label="Light angle" min={-180} max={180} step={1} value={renderSettings.cardLighting.angle} display={`${renderSettings.cardLighting.angle.toFixed(0)}°`} onChange={(event) => onCardLightingChange("angle", Number(event.target.value))} />
             <Slider label="Edge light" min={0} max={0.3} step={0.01} value={renderSettings.cardLighting.edge} display={`${Math.round(renderSettings.cardLighting.edge * 100)}%`} onChange={(event) => onCardLightingChange("edge", Number(event.target.value))} />
+          </>}
+          {styleToggle("Card wobble", renderSettings.cardWobble.enabled, (value) => onCardWobbleChange("enabled", value))}
+          {renderSettings.cardWobble.enabled && <>
+            <Slider label="Wobble amount" min={0} max={0.35} step={0.005} value={renderSettings.cardWobble.amount} display={`${(renderSettings.cardWobble.amount * 57.2958).toFixed(1)}°`} onChange={(event) => onCardWobbleChange("amount", Number(event.target.value))} />
+            <Slider label="Wobble speed" min={0.05} max={2} step={0.01} value={renderSettings.cardWobble.speed} display={`${renderSettings.cardWobble.speed.toFixed(2)} Hz`} onChange={(event) => onCardWobbleChange("speed", Number(event.target.value))} />
+            <Slider label="Card variation" min={0} max={1} step={0.01} value={renderSettings.cardWobble.variation} display={`${Math.round(renderSettings.cardWobble.variation * 100)}%`} onChange={(event) => onCardWobbleChange("variation", Number(event.target.value))} />
           </>}
         </PanelSection>
         <PanelSection title="Content visibility">
