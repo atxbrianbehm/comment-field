@@ -37,7 +37,7 @@ import {
   type TimedKeyframe,
 } from "@comment-field/engine";
 import { exportPngSequence } from "../src/export/pngSequence";
-import { avatarInitialForComment, createCardTextureKey, createSceneAssetKey, fitFrameWithinBounds, performanceProfileKey, selectPerformanceProfile } from "@comment-field/webgpu-runtime";
+import { avatarInitialForComment, createCardTextureKey, createSceneAssetKey, fitFrameWithinBounds, performanceProfileKey, resolveBackgroundPlateDrawRect, selectPerformanceProfile } from "@comment-field/webgpu-runtime";
 import { editorPointToMotion, frameEntrancePath, motionPointToEditor } from "../src/app/motionViewport";
 import {
   choosePreviewDimensions,
@@ -248,6 +248,7 @@ describe("deterministic project core", () => {
       driftAmount: 0,
       driftRotation: 0,
       springAmount: 0,
+      pathVariation: 0,
     };
     const scene = evaluateScene(composition, take, motion, 0);
     const card = scene.cards.find((candidate) => candidate.cardId === base.cardId)!;
@@ -286,12 +287,202 @@ describe("deterministic project core", () => {
     expect(frame.cards[1].opacity).toBe(0);
   });
 
+  it("clamps timing events to take duration so the timeline cannot balloon past Out", () => {
+    const project = createDefaultProject();
+    const take = project.takes[0];
+    take.duration = 200 / 24; // 200 frames @ 24fps
+    take.cardTriggers = [
+      { cardId: "a", triggerTime: 0, influence: 1 },
+      { cardId: "b", triggerTime: 48, influence: 1 }, // ~1152f — past Out
+    ];
+    take.population.postHeroBurstStartTime = 40;
+    take.cameraKeyframes = [{
+      id: "late",
+      time: 49,
+      value: { ...project.compositions[0].camera },
+      interpolation: "linear",
+      easing: { x1: 0, y1: 0, x2: 1, y2: 1 },
+      holdDuration: 0,
+    }];
+    const restored = deserializeProject(serializeProject(project));
+    const shot = restored.takes[0];
+    expect(shot.duration).toBeCloseTo(200 / 24, 8);
+    expect(shot.cardTriggers.every((trigger) => trigger.triggerTime <= shot.duration + 1e-9)).toBe(true);
+    expect(shot.population.postHeroBurstStartTime).toBeLessThanOrEqual(shot.duration + 1e-9);
+    expect(shot.cameraKeyframes.every((keyframe) => keyframe.time <= shot.duration + 1e-9)).toBe(true);
+  });
+
   it("round-trips project JSON and isolates take state", () => {
     const project = createDefaultProject();
     const restored = deserializeProject(serializeProject(project));
     expect(restored.compositions).toEqual(project.compositions);
     expect(restored.takes).toEqual(project.takes);
     expect(restored.takes[0]).not.toBe(restored.compositions[0]);
+  });
+
+  it("persists every authoring parameter through save and load", () => {
+    const project = createDefaultProject();
+    const take = project.takes[0];
+    const composition = project.compositions[0];
+
+    project.name = "Persistence probe";
+    project.cardStyle.strokeWidth = 3.5;
+    project.cardStyle.strokeColor = "#ff00aa";
+    project.cardStyle.showEngagement = false;
+    project.entranceMotion.duration = 0.95;
+    project.entranceMotion.opacityEasing = { x1: 0.4, y1: 0, x2: 0.9, y2: 1 };
+    project.entranceMotion.springAmount = 0.28;
+    project.entranceMotion.pathMode = "rain";
+    project.entranceMotion.rainDistance = 0.8;
+    project.entranceMotion.rainLateral = 0.3;
+    project.renderSettings.transparentExport = true;
+    project.renderSettings.motionBlur.enabled = true;
+    project.renderSettings.motionBlur.shutterAngle = 200;
+    project.renderSettings.sceneShadow.opacity = 0.61;
+    project.renderSettings.cardLighting.intensity = 0.42;
+
+    composition.backgroundColor = "#112233";
+    composition.backgroundPlate = {
+      source: "data:image/png;base64,probe",
+      name: "probe-plate.png",
+      mediaType: "image",
+      visible: false,
+      opacity: 0.37,
+      fit: "contain",
+      includeInExport: true,
+    };
+    composition.fieldBounds = { width: 2, height: 3 };
+    composition.camera = { fov: 38, x: 0.2, y: -0.1, z: 4.5 };
+
+    take.name = "Probe take";
+    take.duration = 11.5;
+    take.favorite = true;
+    take.notes = "keep me";
+    take.build.staggerStart = 0.4;
+    take.build.staggerEnd = 3.1;
+    take.build.staggerEasing = { x1: 0.2, y1: 0.85, x2: 0.45, y2: 1 };
+    take.build.order = "depth";
+    take.build.seed = "persist-build";
+    take.population.enabled = true;
+    take.population.seed = "persist-pop";
+    take.population.initialPopulation = 0.18;
+    take.population.lifeMin = 2.2;
+    take.population.lifeMax = 5.1;
+    take.population.gapMin = 0.2;
+    take.population.gapMax = 0.9;
+    take.population.exitDuration = 0.55;
+    take.population.wanderAmount = 0.04;
+    take.population.scaleVariation = 0.11;
+    take.population.depthVariation = 1.7;
+    take.population.exitDistance = 0.44;
+    take.population.postHeroBurst = 0.73;
+    take.population.postHeroBurstStartTime = 5.25;
+    take.population.postHeroBurstDuration = 1.6;
+    take.population.postHeroBurstEasing = { x1: 0.65, y1: 0, x2: 0.9, y2: 0.12 };
+    take.population.postHeroEntranceDuration = 0.29;
+    take.population.postHeroLifeMin = 0.8;
+    take.population.postHeroLifeMax = 1.4;
+    take.population.postHeroExitDuration = 0.31;
+    take.population.exitMotion.pathMode = "shared";
+    take.population.exitMotion.easing = { x1: 0.3, y1: 0, x2: 0.6, y2: 1 };
+    take.population.exitMotion.opacityEasing = { x1: 0.1, y1: 0, x2: 0.8, y2: 1 };
+    take.population.exitMotion.fade = 0.85;
+    take.population.exitMotion.blur = 5;
+    take.population.exitMotion.scaleTo = 1.2;
+    take.population.exitMotion.rotationOffset = 0.2;
+    take.population.exitMotion.depthOffset = 0.4;
+    take.cardTriggers = [
+      { cardId: composition.cards[0].cardId, triggerTime: 0.5, influence: 1 },
+      { cardId: composition.cards[1].cardId, triggerTime: 1.25, influence: 0.8 },
+    ];
+    take.gestureSamples = [{ time: 0.2, x: 0.3, y: 0.4 }];
+    take.cameraKeyframes = [{
+      id: "cam-1",
+      time: 1.5,
+      value: { ...composition.camera, x: 1 },
+      interpolation: "bezier",
+      easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
+      holdDuration: 0,
+    }];
+    take.hero = {
+      cardId: composition.cards[0].cardId,
+      keyframes: [
+        {
+          id: "h0",
+          time: 2,
+          value: { kind: "source" },
+          interpolation: "bezier",
+          easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
+          holdDuration: 0,
+          path: { start: { x: 0, y: 0 }, control1: { x: 0, y: 0.1 }, control2: { x: 0, y: -0.1 } },
+        },
+        {
+          id: "h1",
+          time: 3.5,
+          value: {
+            kind: "pose",
+            transform: { x: 0.5, y: 0.5, z: 1.5, scale: 1.8, rotation: 0 },
+            targetSpace: "screen",
+            surroundingDim: 0.35,
+            surroundingBlur: 2.1,
+          },
+          interpolation: "bezier",
+          easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
+          holdDuration: 0,
+          path: { start: { x: 0, y: 0 }, control1: { x: 0, y: 0.1 }, control2: { x: 0, y: -0.1 } },
+        },
+      ],
+      reflowRadius: 0.4,
+      attraction: 0.5,
+      falloff: 1.2,
+      maxDisplacement: 0.15,
+      overlapPasses: 2,
+      reflowDuration: 1.1,
+      easing: "ease-out",
+      reflowEasing: "ease-in-out",
+    };
+    take.reflowTargets = {
+      [composition.cards[1].cardId]: { x: 0.2, y: 0.3, z: 0.1, scale: 1, rotation: 0.05 },
+    };
+
+    const json = serializeProject(project);
+    const parsed = JSON.parse(json) as typeof project;
+    // Raw file must contain the authored fields, not only defaults after a partial write.
+    expect(parsed.version).toBe(project.version);
+    expect(parsed.takes[0].build.staggerEasing).toEqual(take.build.staggerEasing);
+    expect(parsed.takes[0].population.postHeroBurstEasing).toEqual(take.population.postHeroBurstEasing);
+    expect(parsed.takes[0].population.postHeroBurstStartTime).toBe(5.25);
+    expect(parsed.compositions[0].backgroundPlate?.fit).toBe("contain");
+    expect(parsed.entranceMotion.rainDistance).toBe(0.8);
+    expect(parsed.renderSettings.cardLighting.intensity).toBe(0.42);
+
+    const restored = deserializeProject(json);
+    const restoredTake = restored.takes[0];
+    const restoredComp = restored.compositions[0];
+
+    expect(restored.version).toBe(project.version);
+    expect(restored.name).toBe("Persistence probe");
+    expect(restored.cardStyle).toEqual(project.cardStyle);
+    expect(restored.entranceMotion).toEqual(project.entranceMotion);
+    expect(restored.renderSettings).toEqual(project.renderSettings);
+    expect(restoredComp.backgroundPlate).toEqual(composition.backgroundPlate);
+    expect(restoredComp.fieldBounds).toEqual({ width: 2, height: 3 });
+    expect(restoredComp.camera).toEqual(composition.camera);
+    expect(restoredTake.name).toBe("Probe take");
+    expect(restoredTake.duration).toBe(11.5);
+    expect(restoredTake.favorite).toBe(true);
+    expect(restoredTake.notes).toBe("keep me");
+    expect(restoredTake.build).toEqual(take.build);
+    expect(restoredTake.population).toEqual(take.population);
+    expect(restoredTake.cardTriggers).toEqual(take.cardTriggers);
+    expect(restoredTake.gestureSamples).toEqual(take.gestureSamples);
+    expect(restoredTake.cameraKeyframes).toEqual(take.cameraKeyframes);
+    expect(restoredTake.hero).toEqual(take.hero);
+    expect(restoredTake.reflowTargets).toEqual(take.reflowTargets);
+
+    // Second save/load must not drift parameters (idempotent migration; updatedAt is rewrite-only).
+    const again = deserializeProject(serializeProject(restored));
+    expect({ ...again, updatedAt: restored.updatedAt }).toEqual(restored);
   });
 
   it("bakes reflow targets outside protected regions", () => {
@@ -435,6 +626,7 @@ describe("deterministic project core", () => {
   it("uses the final burst as an emitter without pre-clearing living cards", () => {
     const living = {
       ...createDefaultProject().takes[0].population,
+      respawn: true,
       initialPopulation: 1,
       lifeMin: 100,
       lifeMax: 100,
@@ -456,15 +648,78 @@ describe("deterministic project core", () => {
     expect(emitted.cycle).toBeGreaterThanOrEqual(10_000);
   });
 
+  it("plays a single out animation without re-entry when hold mode is on", () => {
+    const settings = {
+      ...createDefaultProject().takes[0].population,
+      respawn: false,
+      // Force non-initial so start is exactly triggerTime (no pre-roll age).
+      initialPopulation: 0,
+      postHeroBurst: 0,
+      lifeMin: 0.2,
+      lifeMax: 0.2,
+      exitDuration: 0.2,
+    };
+    // entrance 0.7 + life 0.2 + half of exit 0.2 → still exiting via shared out template
+    const exiting = evaluateCardPopulation(settings, "card-a", 0.7 + 0.2 + 0.1, 0, 0.7, 4);
+    expect(exiting.visible).toBe(true);
+    expect(exiting.exitProgress).toBeCloseTo(0.5, 5);
+    // After out completes, stay gone (no respawn).
+    const gone = evaluateCardPopulation(settings, "card-a", 0.7 + 0.2 + 0.25, 0, 0.7, 4);
+    expect(gone.visible).toBe(false);
+  });
+
+  it("reserves non-initial cards for a single burst wave under hold mode", () => {
+    const settings = {
+      ...createDefaultProject().takes[0].population,
+      respawn: false,
+      initialPopulation: 0,
+      postHeroBurst: 1,
+      postHeroBurstDuration: 0,
+      postHeroEntranceDuration: 0.5,
+      postHeroLifeMin: 2,
+      postHeroLifeMax: 2,
+    };
+    const before = evaluateCardPopulation(settings, "card-a", 1.9, 0, 0.7, 2);
+    const during = evaluateCardPopulation(settings, "card-a", 2.25, 0, 0.7, 2);
+    expect(before.visible).toBe(false);
+    expect(during.visible).toBe(true);
+    expect(during.cycle).toBe(10_000);
+    expect(during.entranceProgress).toBeCloseTo(0.5, 5);
+  });
+
+  it("treats classic respawn burst as a single wave with no re-entry", () => {
+    const settings = {
+      ...createDefaultProject().takes[0].population,
+      respawn: true,
+      initialPopulation: 0,
+      postHeroBurst: 1,
+      postHeroBurstDuration: 0,
+      postHeroEntranceDuration: 0.1,
+      postHeroLifeMin: 0.2,
+      postHeroLifeMax: 0.2,
+      postHeroExitDuration: 0.1,
+      gapMin: 0,
+      gapMax: 0,
+    };
+    const during = evaluateCardPopulation(settings, "card-a", 2.15, 10, 0.7, 2);
+    const after = evaluateCardPopulation(settings, "card-a", 2.6, 10, 0.7, 2);
+    expect(during.visible).toBe(true);
+    expect(during.cycle).toBe(10_000);
+    expect(after.visible).toBe(false);
+    expect(after.cycle).toBe(10_000);
+  });
+
   it("weights final-burst arrivals and uses ending-specific build, life, and exit timing", () => {
     const base = structuredClone(createDefaultProject().takes[0].population);
+    base.respawn = true;
     base.initialPopulation = 0;
     base.postHeroBurst = 1;
     base.postHeroBurstDuration = 1;
     base.postHeroBurstEasing = { x1: 0, y1: 0, x2: 1, y2: 1 };
     const evenDelay = resolvePostHeroBurstDelay(base, "card-a");
+    // Ease-in cumulative curve (ramp up) places samples later than even spacing.
     base.postHeroBurstEasing = { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 };
-    expect(resolvePostHeroBurstDelay(base, "card-a")).toBeLessThan(evenDelay);
+    expect(resolvePostHeroBurstDelay(base, "card-a")).toBeGreaterThan(evenDelay);
 
     base.postHeroBurstDuration = 0;
     base.postHeroEntranceDuration = 0.25;
@@ -478,12 +733,52 @@ describe("deterministic project core", () => {
     expect(exiting.exitProgress).toBeCloseTo(0.5, 10);
   });
 
+  it("visibly separates ramp-up, even, and punch-early burst distributions", () => {
+    const base = structuredClone(createDefaultProject().takes[0].population);
+    base.postHeroBurstDuration = 1;
+    const cardIds = Array.from({ length: 120 }, (_, index) => `arrival-${index}`);
+    const meanDelay = () => cardIds.reduce((sum, cardId) => sum + resolvePostHeroBurstDelay(base, cardId), 0) / cardIds.length;
+
+    // Cumulative ease-in: sparse early, dense late.
+    base.postHeroBurstEasing = { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 };
+    const rampUp = meanDelay();
+    base.postHeroBurstEasing = { x1: 0, y1: 0, x2: 1, y2: 1 };
+    const even = meanDelay();
+    // Cumulative ease-out: dense early, sparse late.
+    base.postHeroBurstEasing = { x1: 0.15, y1: 0.75, x2: 0.45, y2: 1 };
+    const punchEarly = meanDelay();
+
+    expect(rampUp).toBeGreaterThan(even + 0.15);
+    expect(punchEarly).toBeLessThan(even - 0.15);
+  });
+
+  it("ramps build triggers with the stagger arrival curve", () => {
+    const project = createDefaultProject();
+    const cards = project.compositions[0].cards.slice(0, 40);
+    const base = { ...project.takes[0].build, staggerStart: 0, staggerEnd: 1, seed: "stagger-test", order: "left-to-right" as const };
+    const mean = (easing: { x1: number; y1: number; x2: number; y2: number }) => {
+      const triggers = resolveBuildTriggers(cards, { ...base, staggerEasing: easing });
+      return triggers.reduce((sum, trigger) => sum + trigger.triggerTime, 0) / triggers.length;
+    };
+    const even = mean({ x1: 0, y1: 0, x2: 1, y2: 1 });
+    const ramp = mean({ x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 });
+    const punch = mean({ x1: 0.15, y1: 0.75, x2: 0.45, y2: 1 });
+    expect(ramp).toBeGreaterThan(even + 0.1);
+    expect(punch).toBeLessThan(even - 0.1);
+    // Order is preserved: first ranked card still arrives first.
+    const ordered = resolveBuildTriggers(cards, { ...base, staggerEasing: { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 } });
+    for (let index = 1; index < ordered.length; index += 1) {
+      expect(ordered[index].triggerTime).toBeGreaterThanOrEqual(ordered[index - 1].triggerTime);
+    }
+  });
+
   it("evaluates independent shared and scattered out lines deterministically", () => {
     const population = structuredClone(createDefaultProject().takes[0].population);
     const scattered = resolveExitPath(population, "card-a", 2);
     expect(resolveExitPath(population, "card-a", 2)).toEqual(scattered);
     expect(resolveExitPath(population, "card-b", 2)).not.toEqual(scattered);
     population.exitMotion.pathMode = "shared";
+    population.exitMotion.pathVariation = 0;
     population.exitMotion.path = { start: { x: 0.4, y: -0.2 }, control1: { x: 0.3, y: -0.12 }, control2: { x: 0.1, y: -0.04 } };
     expect(resolveExitPath(population, "card-a", 2)).toEqual(population.exitMotion.path);
     expect(resolveExitPath(population, "card-b", 8)).toEqual(population.exitMotion.path);
@@ -524,7 +819,7 @@ describe("deterministic project core", () => {
     legacy.version = 10;
     for (const take of legacy.takes) delete (take as Partial<typeof take>).population;
     const migrated = deserializeProject(JSON.stringify(legacy));
-    expect(migrated.version).toBe(16);
+    expect(migrated.version).toBe(21);
     expect(migrated.takes.every((take) => take.population.enabled === false)).toBe(true);
   });
 
@@ -538,6 +833,7 @@ describe("deterministic project core", () => {
       driftAmount: 0,
       driftRotation: 0,
       springAmount: 0,
+      pathVariation: 0,
     };
     const first = resolveEntrancePath(rain, "seed", "card-a");
     expect(resolveEntrancePath(rain, "seed", "card-a")).toEqual(first);
@@ -724,6 +1020,12 @@ describe("deterministic project core", () => {
     const key = createPreviewCacheKey(composition, take, project.entranceMotion, project.comments, project.cardStyle);
     expect(createPreviewCacheKey(composition, { ...take, name: "Renamed", notes: "Review" }, project.entranceMotion, project.comments, project.cardStyle)).toBe(key);
     expect(createPreviewCacheKey({ ...composition, backgroundColor: "#000000" }, take, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(key);
+    const plate = { source: "data:image/png;base64,plate", name: "Agency plate.png", mediaType: "image" as const, visible: true, opacity: 0.7, fit: "cover" as const, includeInExport: false };
+    const plateKey = createPreviewCacheKey({ ...composition, backgroundPlate: plate }, take, project.entranceMotion, project.comments, project.cardStyle);
+    expect(plateKey).not.toBe(key);
+    expect(createPreviewCacheKey({ ...composition, backgroundPlate: { ...plate, name: "Renamed.png", includeInExport: true } }, take, project.entranceMotion, project.comments, project.cardStyle)).toBe(plateKey);
+    expect(createPreviewCacheKey({ ...composition, backgroundPlate: { ...plate, opacity: 0.2 } }, take, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(plateKey);
+    expect(createPreviewCacheKey({ ...composition, backgroundPlate: { ...plate, mediaType: "video" } }, take, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(plateKey);
     expect(createPreviewCacheKey(composition, take, { ...project.entranceMotion, driftAmount: 0.02 }, project.comments, project.cardStyle)).not.toBe(key);
     expect(createPreviewCacheKey(composition, { ...take, duration: take.duration + 1 }, project.entranceMotion, project.comments, project.cardStyle)).not.toBe(key);
     expect(createPreviewCacheKey(composition, take, project.entranceMotion, project.comments, project.cardStyle, { ...project.renderSettings, motionBlur: { ...project.renderSettings.motionBlur, enabled: true } })).not.toBe(
@@ -743,6 +1045,16 @@ describe("deterministic project core", () => {
     expect(window.last).toBeGreaterThan(30);
     expect(wallClockPlaybackTime(0, 1_000, 9_000, 8)).toBe(8);
     expect(wallClockPlaybackTime(2, 1_000, 4_000, 8)).toBe(5);
+  });
+
+  it("fits image and MP4 plates while preserving aspect ratio", () => {
+    const cover = resolveBackgroundPlateDrawRect(1920, 1080, 1080, 1920, "cover");
+    expect(cover.x).toBe(0);
+    expect(cover.y).toBeCloseTo(-1166.67, 1);
+    expect(cover.width).toBe(1920);
+    expect(cover.height).toBeCloseTo(3413.33, 1);
+    expect(resolveBackgroundPlateDrawRect(1920, 1080, 1080, 1920, "contain")).toEqual({ x: 656.25, y: 0, width: 607.5, height: 1080 });
+    expect(resolveBackgroundPlateDrawRect(1920, 1080, 1080, 1920, "stretch")).toEqual({ x: 0, y: 0, width: 1920, height: 1080 });
   });
 
   it("builds a playable draft pass before refining exact 24 fps frames", () => {

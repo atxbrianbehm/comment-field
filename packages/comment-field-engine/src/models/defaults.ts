@@ -6,6 +6,7 @@ import type { BuildPerformance, CardPopulationSettings, CardStyle, Composition, 
 import { PROJECT_VERSION } from "./types";
 
 export const DEFAULT_CARD_STYLE: CardStyle = {
+  postType: "x",
   width: 420,
   background: "#FFFFFF",
   backgroundOpacity: 0.96,
@@ -45,6 +46,7 @@ export const DEFAULT_ENTRANCE_MOTION: EntranceMotionTemplate = {
   pathMode: "shared",
   rainDistance: 0.55,
   rainLateral: 0.22,
+  pathVariation: 0.06,
   easing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
   opacityEasing: { x1: 0.16, y1: 1, x2: 0.3, y2: 1 },
 };
@@ -70,6 +72,12 @@ export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
     angle: -45,
     edge: 0.08,
   },
+  cardWobble: {
+    enabled: false,
+    amount: 0.09,
+    speed: 0.7,
+    variation: 0.35,
+  },
   transparentExport: false,
 };
 
@@ -85,6 +93,12 @@ export const DEFAULT_SCATTER: ScatterSettings = {
   overlapAllowance: 0.18,
 };
 
+/** Ease-in cumulative arrival: sparse early, accelerates into the end of the interval. */
+export const RAMP_UP_ARRIVAL_EASING = { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 } as const;
+/** Ease-out cumulative arrival: most cards land in the first part of the interval. */
+export const PUNCH_EARLY_ARRIVAL_EASING = { x1: 0.15, y1: 0.75, x2: 0.45, y2: 1 } as const;
+export const EVEN_ARRIVAL_EASING = { x1: 0, y1: 0, x2: 1, y2: 1 } as const;
+
 export const DEFAULT_BUILD: BuildPerformance = {
   seed: "build-01",
   fade: 1,
@@ -95,6 +109,7 @@ export const DEFAULT_BUILD: BuildPerformance = {
   easing: "ease-out",
   staggerStart: 0,
   staggerEnd: 2.6,
+  staggerEasing: { ...RAMP_UP_ARRIVAL_EASING },
   order: "random",
 };
 
@@ -112,12 +127,15 @@ export const DEFAULT_EXIT_MOTION: ExitMotionTemplate = {
   scaleTo: 1.08,
   rotationOffset: 0.1,
   depthOffset: 0.28,
+  pathVariation: 0.1,
 };
 
 export const DEFAULT_CARD_POPULATION: CardPopulationSettings = {
   enabled: true,
   seed: "population-01",
   initialPopulation: 0.35,
+  /** Hold cards once they appear so the shot is authorable inside Out. */
+  respawn: false,
   lifeMin: 1.8,
   lifeMax: 4.5,
   gapMin: 0.45,
@@ -130,11 +148,13 @@ export const DEFAULT_CARD_POPULATION: CardPopulationSettings = {
   exitMotion: cloneValue(DEFAULT_EXIT_MOTION),
   postHeroBurst: 0.9,
   postHeroBurstStartTime: 6,
-  postHeroBurstDuration: 0.5,
-  postHeroBurstEasing: { x1: 0.55, y1: 0, x2: 0.85, y2: 0.25 },
+  /** Default ~1s interval so the arrival curve can read on the timeline. */
+  postHeroBurstDuration: 1,
+  postHeroBurstEasing: { ...RAMP_UP_ARRIVAL_EASING },
   postHeroEntranceDuration: 1 / 3,
-  postHeroLifeMin: 0.75,
-  postHeroLifeMax: 1.5,
+  /** Hold through the end of a typical take after the bloom. */
+  postHeroLifeMin: 8,
+  postHeroLifeMax: 12,
   postHeroExitDuration: 1 / 3,
 };
 

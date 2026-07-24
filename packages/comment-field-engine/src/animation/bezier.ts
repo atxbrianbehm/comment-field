@@ -37,6 +37,25 @@ export function evaluateBezierCurve(curve: CubicBezierCurve, progress: number): 
   return cubicPoint({ x: 0, y: 0 }, { x: curve.x1, y: curve.y1 }, { x: curve.x2, y: curve.y2 }, { x: 1, y: 1 }, t).y;
 }
 
+/**
+ * Inverse of {@link evaluateBezierCurve}: given a y value, solve for the x that produces it.
+ * Used when a curve is authored as cumulative progress over time (e.g. arrival density),
+ * so a unit sample maps to the time when that fraction of events should have fired.
+ */
+export function invertBezierCurve(curve: CubicBezierCurve, value: number): number {
+  const target = clamp(value);
+  if (target <= 0) return 0;
+  if (target >= 1) return 1;
+  let low = 0;
+  let high = 1;
+  for (let index = 0; index < 18; index += 1) {
+    const midpoint = (low + high) / 2;
+    if (evaluateBezierCurve(curve, midpoint) < target) low = midpoint;
+    else high = midpoint;
+  }
+  return (low + high) / 2;
+}
+
 export function relativePathBetween(path: SpatialBezierPath, from: Point2D, to: Point2D, progress: number): Point2D {
   const offset = evaluateSpatialPath(path, progress);
   return {

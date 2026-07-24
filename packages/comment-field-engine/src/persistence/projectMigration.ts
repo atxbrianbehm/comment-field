@@ -1,10 +1,37 @@
 import { DEFAULT_CAMERA_EASING, isLegacyCameraSnapEasing } from "../animation/camera";
-import { PROJECT_VERSION, type Project, type Take } from "../models/types";
-import { DEFAULT_CARD_POPULATION, DEFAULT_ENTRANCE_MOTION, DEFAULT_EXIT_MOTION, DEFAULT_RENDER_SETTINGS } from "../models/defaults";
+import { PROJECT_VERSION, type CubicBezierCurve, type Project, type Take } from "../models/types";
+import {
+  DEFAULT_BUILD,
+  DEFAULT_CARD_POPULATION,
+  DEFAULT_ENTRANCE_MOTION,
+  DEFAULT_EXIT_MOTION,
+  DEFAULT_RENDER_SETTINGS,
+  EVEN_ARRIVAL_EASING,
+  PUNCH_EARLY_ARRIVAL_EASING,
+  RAMP_UP_ARRIVAL_EASING,
+} from "../models/defaults";
 import { cloneValue } from "../utils/clone";
 
+function curvesMatch(a: CubicBezierCurve | undefined, b: CubicBezierCurve) {
+  if (!a) return false;
+  return Math.abs(a.x1 - b.x1) < 1e-6
+    && Math.abs(a.y1 - b.y1) < 1e-6
+    && Math.abs(a.x2 - b.x2) < 1e-6
+    && Math.abs(a.y2 - b.y2) < 1e-6;
+}
+
+/**
+ * Clone + fill missing fields + stamp the current schema version.
+ * Used for both save and load so every persisted file carries a complete parameter set
+ * (timing curves, burst settings, plates, render settings, etc.) without wiping authored values.
+ */
+export function prepareProjectForPersistence(project: Project): Project {
+  return migrateProject(project);
+}
+
 export function serializeProject(project: Project): string {
-  return JSON.stringify({ ...project, updatedAt: new Date().toISOString() }, null, 2);
+  const prepared = prepareProjectForPersistence(project);
+  return JSON.stringify({ ...prepared, updatedAt: new Date().toISOString() }, null, 2);
 }
 
 export function deserializeProject(source: string): Project {
@@ -12,8 +39,10 @@ export function deserializeProject(source: string): Project {
   if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.compositions) || !Array.isArray(parsed.takes)) {
     throw new Error("This file is not a Comment Field project.");
   }
-  if (parsed.version > PROJECT_VERSION) throw new Error(`Project version ${parsed.version} is newer than this app supports.`);
-  return migrateProject(parsed);
+  if (typeof parsed.version === "number" && parsed.version > PROJECT_VERSION) {
+    throw new Error(`Project version ${parsed.version} is newer than this app supports.`);
+  }
+  return prepareProjectForPersistence(parsed);
 }
 
 export function migrateProject(project: Project): Project {
@@ -38,16 +67,43 @@ export function migrateProject(project: Project): Project {
   migrated.renderSettings.cardLighting.intensity ??= DEFAULT_RENDER_SETTINGS.cardLighting.intensity;
   migrated.renderSettings.cardLighting.angle ??= DEFAULT_RENDER_SETTINGS.cardLighting.angle;
   migrated.renderSettings.cardLighting.edge ??= DEFAULT_RENDER_SETTINGS.cardLighting.edge;
+  migrated.renderSettings.cardWobble ??= cloneValue(DEFAULT_RENDER_SETTINGS.cardWobble);
+  migrated.renderSettings.cardWobble.enabled ??= false;
+  migrated.renderSettings.cardWobble.amount ??= DEFAULT_RENDER_SETTINGS.cardWobble.amount;
+  migrated.renderSettings.cardWobble.speed ??= DEFAULT_RENDER_SETTINGS.cardWobble.speed;
+  migrated.renderSettings.cardWobble.variation ??= DEFAULT_RENDER_SETTINGS.cardWobble.variation;
+  if (legacyVersion < 21) migrated.renderSettings.cardWobble.enabled = false;
   migrated.renderSettings.transparentExport ??= DEFAULT_RENDER_SETTINGS.transparentExport;
   const legacyDurations = new Map<string, number>();
   for (const composition of migrated.compositions) {
     const legacyComposition = composition as CompositionWithLegacyDuration;
     legacyDurations.set(composition.id, legacyComposition.duration ?? 8);
     composition.fieldBounds ??= legacyVersion < 5 ? { width: 1, height: 1 } : { width: 3, height: 3 };
+    if (!composition.backgroundPlate && legacyComposition.backgroundImage) {
+      composition.backgroundPlate = {
+        source: legacyComposition.backgroundImage,
+        name: "Legacy background plate",
+        mediaType: "image",
+        visible: true,
+        opacity: 1,
+        fit: "cover",
+        includeInExport: true,
+      };
+    }
+    if (composition.backgroundPlate) {
+      composition.backgroundPlate.name ||= "Background plate";
+      composition.backgroundPlate.mediaType ??= composition.backgroundPlate.source.startsWith("data:video/") ? "video" : "image";
+      composition.backgroundPlate.visible ??= true;
+      composition.backgroundPlate.opacity ??= 1;
+      composition.backgroundPlate.fit ??= "cover";
+      composition.backgroundPlate.includeInExport ??= false;
+    }
     delete legacyComposition.duration;
+    delete legacyComposition.backgroundImage;
   }
   migrated.cardStyle.strokeWidth ??= 0;
   migrated.cardStyle.strokeColor ??= "#1B1B18";
+  migrated.cardStyle.postType ??= "x";
   migrated.cardStyle.showAvatar ??= true;
   migrated.cardStyle.showDisplayName ??= true;
   migrated.cardStyle.showHandle ??= true;
@@ -91,12 +147,14 @@ export function migrateProject(project: Project): Project {
   migrated.entranceMotion.pathMode ??= DEFAULT_ENTRANCE_MOTION.pathMode;
   migrated.entranceMotion.rainDistance ??= DEFAULT_ENTRANCE_MOTION.rainDistance;
   migrated.entranceMotion.rainLateral ??= DEFAULT_ENTRANCE_MOTION.rainLateral;
+  migrated.entranceMotion.pathVariation ??= legacyVersion < 21 ? 0 : DEFAULT_ENTRANCE_MOTION.pathVariation;
   for (const take of migrated.takes) {
     if (take.entranceOverride) {
       take.entranceOverride.opacityEasing ??= cloneValue(take.entranceOverride.easing);
       take.entranceOverride.pathMode ??= DEFAULT_ENTRANCE_MOTION.pathMode;
       take.entranceOverride.rainDistance ??= DEFAULT_ENTRANCE_MOTION.rainDistance;
       take.entranceOverride.rainLateral ??= DEFAULT_ENTRANCE_MOTION.rainLateral;
+      take.entranceOverride.pathVariation ??= legacyVersion < 21 ? 0 : DEFAULT_ENTRANCE_MOTION.pathVariation;
     }
   }
   if (legacyVersion < 4) {
@@ -122,6 +180,28 @@ export function migrateProject(project: Project): Project {
   }
   for (const take of migrated.takes) {
     take.duration ??= legacyDurations.get(take.compositionId) ?? 8;
+    take.build ??= {
+      ...cloneValue(DEFAULT_BUILD),
+      seed: `${take.id}-build`,
+    };
+    take.build.seed ??= `${take.id}-build`;
+    take.build.fade ??= DEFAULT_BUILD.fade;
+    take.build.scaleFrom ??= DEFAULT_BUILD.scaleFrom;
+    take.build.blur ??= DEFAULT_BUILD.blur;
+    take.build.drift ??= DEFAULT_BUILD.drift;
+    take.build.duration ??= DEFAULT_BUILD.duration;
+    take.build.easing ??= DEFAULT_BUILD.easing;
+    take.build.staggerStart ??= DEFAULT_BUILD.staggerStart;
+    take.build.staggerEnd ??= DEFAULT_BUILD.staggerEnd;
+    take.build.order ??= DEFAULT_BUILD.order;
+    // Pre-v19 builds used linear stagger only; keep that so saved trigger density does not jump.
+    take.build.staggerEasing ??= legacyVersion < 19
+      ? { ...EVEN_ARRIVAL_EASING }
+      : cloneValue(DEFAULT_BUILD.staggerEasing);
+    take.gestureSamples ??= [];
+    take.cardTriggers ??= [];
+    take.reflowTargets ??= {};
+    take.cameraKeyframes ??= [];
     take.population ??= {
       ...cloneValue(DEFAULT_CARD_POPULATION),
       enabled: false,
@@ -130,6 +210,8 @@ export function migrateProject(project: Project): Project {
     take.population.enabled ??= false;
     take.population.seed ??= `${take.build?.seed ?? take.id}-population`;
     take.population.initialPopulation ??= DEFAULT_CARD_POPULATION.initialPopulation;
+    // Default is hold-through-shot (no mid-take leave/return). Authors can re-enable churn.
+    take.population.respawn ??= false;
     take.population.lifeMin ??= DEFAULT_CARD_POPULATION.lifeMin;
     take.population.lifeMax ??= DEFAULT_CARD_POPULATION.lifeMax;
     take.population.gapMin ??= DEFAULT_CARD_POPULATION.gapMin;
@@ -149,15 +231,25 @@ export function migrateProject(project: Project): Project {
     take.population.exitMotion.scaleTo ??= DEFAULT_EXIT_MOTION.scaleTo;
     take.population.exitMotion.rotationOffset ??= DEFAULT_EXIT_MOTION.rotationOffset;
     take.population.exitMotion.depthOffset ??= DEFAULT_EXIT_MOTION.depthOffset;
+    take.population.exitMotion.pathVariation ??= legacyVersion < 21 ? 0 : DEFAULT_EXIT_MOTION.pathVariation;
     take.population.postHeroBurst ??= DEFAULT_CARD_POPULATION.postHeroBurst;
     take.population.postHeroBurstStartTime ??= Math.max(0, take.duration - 2);
     take.population.postHeroBurstDuration ??= DEFAULT_CARD_POPULATION.postHeroBurstDuration;
-    take.population.postHeroBurstEasing ??= { x1: 0, y1: 0, x2: 1, y2: 1 };
+    take.population.postHeroBurstEasing ??= { ...EVEN_ARRIVAL_EASING };
+    // v19 reads arrival curves as cumulative density over time (same mental model as motion
+    // eases). Older projects treated the same control points as a delay quantile, so swap the
+    // two shipped presets so Front-load / Back-load still land the same.
+    if (legacyVersion < 19 && take.population.postHeroBurstEasing) {
+      if (curvesMatch(take.population.postHeroBurstEasing, RAMP_UP_ARRIVAL_EASING)) {
+        take.population.postHeroBurstEasing = { ...PUNCH_EARLY_ARRIVAL_EASING };
+      } else if (curvesMatch(take.population.postHeroBurstEasing, PUNCH_EARLY_ARRIVAL_EASING)) {
+        take.population.postHeroBurstEasing = { ...RAMP_UP_ARRIVAL_EASING };
+      }
+    }
     take.population.postHeroEntranceDuration ??= (take.entranceOverride ?? migrated.entranceMotion).duration;
     take.population.postHeroLifeMin ??= take.population.lifeMin;
     take.population.postHeroLifeMax ??= take.population.lifeMax;
     take.population.postHeroExitDuration ??= take.population.exitDuration;
-    take.cameraKeyframes ??= [];
     take.cameraKeyframes = take.cameraKeyframes.map((keyframe) => {
       const legacy = keyframe as typeof keyframe & { pose?: typeof keyframe.value; cut?: boolean };
       const value = keyframe.value ?? legacy.pose;
@@ -208,11 +300,56 @@ export function migrateProject(project: Project): Project {
       delete legacyHero.surroundingBlur;
       delete legacyHero.targetSpace;
     }
+    // Before v17 the burst cue was implicitly locked to the final hero key,
+    // even though a start time was serialized. Preserve that rendered timing
+    // while making the cue independently art-directable going forward.
+    if (legacyVersion < 17 && take.hero?.keyframes?.length) {
+      take.population.postHeroBurstStartTime = Math.max(...take.hero.keyframes.map((keyframe) => keyframe.time));
+    }
+    // Timeline length is shot duration. Events past Out (from older longer takes,
+    // unit mixups, etc.) must not keep expanding the scrubbable range.
+    clampTakeTimingToDuration(take);
   }
   return migrated;
 }
 
-type CompositionWithLegacyDuration = Project["compositions"][number] & { duration?: number };
+function clampTime(value: number, duration: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(duration, value));
+}
+
+function clampTakeTimingToDuration(take: Take) {
+  const duration = Math.max(0, take.duration);
+  take.population.postHeroBurstStartTime = clampTime(take.population.postHeroBurstStartTime, duration);
+  if (take.population.postHeroBurstDuration > duration) {
+    take.population.postHeroBurstDuration = duration;
+  }
+  take.cardTriggers = take.cardTriggers.map((trigger) => ({
+    ...trigger,
+    triggerTime: clampTime(trigger.triggerTime, duration),
+  }));
+  take.gestureSamples = take.gestureSamples.map((sample) => ({
+    ...sample,
+    time: clampTime(sample.time, duration),
+  }));
+  take.cameraKeyframes = take.cameraKeyframes.map((keyframe) => ({
+    ...keyframe,
+    time: clampTime(keyframe.time, duration),
+  }));
+  if (take.hero?.keyframes) {
+    take.hero.keyframes = take.hero.keyframes.map((keyframe) => ({
+      ...keyframe,
+      time: clampTime(keyframe.time, duration),
+    }));
+  }
+  if (take.build.staggerStart > duration) take.build.staggerStart = 0;
+  if (take.build.staggerEnd > duration) take.build.staggerEnd = duration;
+  if (take.build.staggerEnd < take.build.staggerStart) {
+    take.build.staggerEnd = take.build.staggerStart;
+  }
+}
+
+type CompositionWithLegacyDuration = Project["compositions"][number] & { duration?: number; backgroundImage?: string };
 
 function baseDirection(drift: number) {
   return drift;

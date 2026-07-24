@@ -1,4 +1,4 @@
-export const PROJECT_VERSION = 16;
+export const PROJECT_VERSION = 21;
 
 export interface CommentRecord {
   id: string;
@@ -13,7 +13,10 @@ export interface CommentRecord {
   avatarColor: string;
 }
 
+export type SocialPostType = "x" | "instagram" | "facebook";
+
 export interface CardStyle {
+  postType: SocialPostType;
   width: number;
   background: string;
   backgroundOpacity: number;
@@ -80,6 +83,19 @@ export interface FieldBounds {
   height: number;
 }
 
+export type BackgroundPlateFit = "cover" | "contain" | "stretch";
+export type BackgroundPlateMediaType = "image" | "video";
+
+export interface BackgroundPlate {
+  source: string;
+  name: string;
+  mediaType: BackgroundPlateMediaType;
+  visible: boolean;
+  opacity: number;
+  fit: BackgroundPlateFit;
+  includeInExport: boolean;
+}
+
 export interface CameraKeyframe {
   id: string;
   time: number;
@@ -102,7 +118,7 @@ export interface Composition {
   frameRate: number;
   seed: string;
   backgroundColor: string;
-  backgroundImage?: string;
+  backgroundPlate?: BackgroundPlate;
   scatter: ScatterSettings;
   cards: CardPlacement[];
   camera: CameraState;
@@ -173,6 +189,8 @@ export interface EntranceMotionTemplate extends SpringMotionSettings, AmbientDri
   rainDistance: number;
   /** Max |x| lateral start offset for rain mode; each card picks a deterministic value in [-spread, spread]. */
   rainLateral: number;
+  /** Deterministic per-card perturbation of the authored path in field-space units. */
+  pathVariation: number;
   easing: CubicBezierCurve;
   opacityEasing: CubicBezierCurve;
 }
@@ -200,10 +218,21 @@ export interface CardLightingSettings {
   edge: number;
 }
 
+export interface CardWobbleSettings {
+  enabled: boolean;
+  /** Maximum bend angle in radians. */
+  amount: number;
+  /** Base oscillation frequency in Hertz. */
+  speed: number;
+  /** Per-card speed and amplitude spread from 0-1. */
+  variation: number;
+}
+
 export interface RenderSettings {
   motionBlur: MotionBlurSettings;
   sceneShadow: SceneShadowSettings;
   cardLighting: CardLightingSettings;
+  cardWobble: CardWobbleSettings;
   /** When true, PNG sequence export clears to transparent and omits the composition background. */
   transparentExport: boolean;
 }
@@ -241,6 +270,11 @@ export interface BuildPerformance {
   easing: EasingName;
   staggerStart: number;
   staggerEnd: number;
+  /**
+   * Cumulative arrival curve across the stagger interval (x = time, y = fraction triggered).
+   * Ease-in ramps density up; ease-out punches early; linear is even spacing.
+   */
+  staggerEasing: CubicBezierCurve;
   order: BuildOrder;
 }
 
@@ -262,6 +296,12 @@ export interface CardPopulationSettings {
   seed: string;
   /** Fraction of cards already living behind the action at frame zero. */
   initialPopulation: number;
+  /**
+   * When false (default), each card appears once, holds, then plays the shared out
+   * animation once — no mid-take leave/return. A subset is reserved for the final burst.
+   * When true, classic life/gap churn re-enters cards after they leave.
+   */
+  respawn: boolean;
   lifeMin: number;
   lifeMax: number;
   gapMin: number;
@@ -278,7 +318,10 @@ export interface CardPopulationSettings {
   postHeroBurstStartTime: number;
   /** Window in seconds across which eligible cards relaunch. */
   postHeroBurstDuration: number;
-  /** Shapes deterministic card delays inside the burst window. */
+  /**
+   * Cumulative arrival curve inside the burst interval (x = time, y = fraction arrived).
+   * Same mental model as entrance/camera eases: ease-in ramps up, ease-out punches early.
+   */
   postHeroBurstEasing: CubicBezierCurve;
   postHeroEntranceDuration: number;
   postHeroLifeMin: number;
@@ -299,6 +342,8 @@ export interface ExitMotionTemplate {
   scaleTo: number;
   rotationOffset: number;
   depthOffset: number;
+  /** Deterministic per-card perturbation of the authored path in field-space units. */
+  pathVariation: number;
 }
 
 export interface HeroPerformance {

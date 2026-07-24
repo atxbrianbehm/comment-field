@@ -1,5 +1,8 @@
-import type { BuildPerformance, CardPlacement, CardTrigger } from "../models/types";
+import type { BuildPerformance, CardPlacement, CardTrigger, CubicBezierCurve } from "../models/types";
 import { createPrng } from "../utils/prng";
+import { invertBezierCurve } from "./bezier";
+
+const LINEAR_STAGGER: CubicBezierCurve = { x1: 0, y1: 0, x2: 1, y2: 1 };
 
 export function resolveBuildTriggers(cards: CardPlacement[], build: BuildPerformance): CardTrigger[] {
   const random = createPrng(build.seed);
@@ -15,9 +18,17 @@ export function resolveBuildTriggers(cards: CardPlacement[], build: BuildPerform
     return a.random - b.random || a.card.cardId.localeCompare(b.card.cardId);
   });
   const denominator = Math.max(1, randomized.length - 1);
-  return randomized.map(({ card }, index) => ({
-    cardId: card.cardId,
-    triggerTime: build.staggerStart + (index / denominator) * (build.staggerEnd - build.staggerStart),
-    influence: 1,
-  }));
+  const span = build.staggerEnd - build.staggerStart;
+  const curve = build.staggerEasing ?? LINEAR_STAGGER;
+  return randomized.map(({ card }, index) => {
+    // Rank is ordered position in the build (not a random delay sample). The curve is a
+    // cumulative arrival map: ease-in packs more triggers toward stagger end (ramp up).
+    const rank = index / denominator;
+    const arrival = invertBezierCurve(curve, rank);
+    return {
+      cardId: card.cardId,
+      triggerTime: build.staggerStart + arrival * span,
+      influence: 1,
+    };
+  });
 }

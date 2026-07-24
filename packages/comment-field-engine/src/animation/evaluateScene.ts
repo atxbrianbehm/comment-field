@@ -14,7 +14,7 @@ export function evaluateScene(composition: Composition, take: Take, entranceMoti
   const heroKeys = hero ? sortedHeroKeyframes(hero) : [];
   const heroStart = hero ? heroStartTime(hero) : Number.POSITIVE_INFINITY;
   const heroEnd = hero ? heroEndTime(hero) : undefined;
-  const finalBurstStart = heroEnd ?? take.population.postHeroBurstStartTime ?? Math.max(0, take.duration - 2);
+  const finalBurstStart = take.population.postHeroBurstStartTime ?? heroEnd ?? Math.max(0, take.duration - 2);
   function screenRelativeFieldPosition(base: Composition["cards"][number], z: number, offset: Point2D) {
     const baseWorld = fieldPointToWorld(composition, base);
     const baseScreen = projectWorldPoint(composition, camera, { ...baseWorld, z: base.z });

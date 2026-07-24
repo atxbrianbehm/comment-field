@@ -2,6 +2,7 @@ import type { EntranceMotionTemplate, Point2D, SpatialBezierPath } from "../mode
 import { clamp, lerp } from "../utils/math";
 import { evaluateBezierCurve, evaluateSpatialPath } from "./bezier";
 import { resolveAuthoringDepth } from "./depth";
+import { varySpatialPath } from "./pathVariation";
 
 const TAU = Math.PI * 2;
 
@@ -24,18 +25,21 @@ export function resolveEntrancePath(
   seed: string,
   cardId: string,
 ): SpatialBezierPath {
-  if (motion.pathMode !== "rain") return motion.path;
+  if (motion.pathMode !== "rain") {
+    return varySpatialPath(motion.path, motion.pathVariation, `${seed}:${cardId}:entrance`);
+  }
   // Positive field Y is down-screen; start below settle so cards pop up into place.
   const distance = Math.max(0.05, Number.isFinite(motion.rainDistance) ? motion.rainDistance : 0.55);
   const spread = Math.max(0, Number.isFinite(motion.rainLateral) ? motion.rainLateral : 0.22);
   const lateral = (hashUnit(`${seed}:${cardId}:rain-x`) * 2 - 1) * spread;
   const sway = (hashUnit(`${seed}:${cardId}:rain-sway`) * 2 - 1) * spread * 0.45;
   const midSway = (hashUnit(`${seed}:${cardId}:rain-mid`) * 2 - 1) * spread * 0.35;
-  return {
+  const path = {
     start: { x: lateral, y: distance },
     control1: { x: lateral * 0.75 + sway, y: distance * 0.68 },
     control2: { x: midSway * 0.5, y: distance * 0.28 },
   };
+  return varySpatialPath(path, motion.pathVariation, `${seed}:${cardId}:entrance`);
 }
 
 function smoothstep(edge0: number, edge1: number, value: number) {
