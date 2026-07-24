@@ -223,8 +223,12 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller) return;
-    return setSceneBackground(controller, props.composition.backgroundImage, paint);
-  }, [props.composition.backgroundImage, runtimeReady]);
+    return setSceneBackground(controller, props.composition.backgroundPlate, {
+      width: props.composition.width,
+      height: props.composition.height,
+      backgroundColor: props.composition.backgroundColor,
+    }, paint);
+  }, [JSON.stringify(props.composition.backgroundPlate), props.composition.backgroundColor, props.composition.width, props.composition.height, runtimeReady]);
 
   const styleSignature = JSON.stringify(props.cardStyle);
   const commentsSignature = JSON.stringify(props.comments);
@@ -265,6 +269,7 @@ export const CommentScene = forwardRef<CommentSceneHandle, CommentSceneProps>(fu
       if (!controller) throw new Error("Renderer is not ready");
       const blob = await renderPngBlob(controller, renderInput(time), overviewCameraRef.current, width, height, {
         transparent: options?.transparent,
+        omitBackgroundPlate: props.composition.backgroundPlate?.includeInExport === false,
         soloCardIds: options?.soloCardIds,
       });
       if (!controller.exporting) paint();

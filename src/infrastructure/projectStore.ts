@@ -1,5 +1,5 @@
 import { openDB } from "idb";
-import { migrateProject, type Project } from "@comment-field/engine";
+import { prepareProjectForPersistence, type Project } from "@comment-field/engine";
 
 const DB_NAME = "comment-field";
 const STORE_NAME = "projects";
@@ -15,11 +15,12 @@ async function database() {
 
 export async function saveAutosave(project: Project) {
   const db = await database();
-  await db.put(STORE_NAME, project, ACTIVE_KEY);
+  // Normalize before write so every field (timing curves, burst, plates, etc.) is stored.
+  await db.put(STORE_NAME, prepareProjectForPersistence(project), ACTIVE_KEY);
 }
 
 export async function loadAutosave(): Promise<Project | undefined> {
   const db = await database();
   const saved = await db.get(STORE_NAME, ACTIVE_KEY) as Project | undefined;
-  return saved ? migrateProject(saved) : undefined;
+  return saved ? prepareProjectForPersistence(saved) : undefined;
 }

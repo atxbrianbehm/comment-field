@@ -57,14 +57,16 @@ export function renderCardSurface(comment: CommentRecord, style: CardStyle, canv
   const shadowMargin = 24;
   const width = style.width;
   const contentWidth = width - style.padding * 2;
+  const postType = style.postType ?? "x";
   const context = canvas.getContext("2d") as CardContext;
   context.font = `${style.bodySize}px Inter, ui-sans-serif, system-ui, sans-serif`;
   const lines = wrapLines(context, comment.message || " ", contentWidth).slice(0, 40);
   const headerVisible = style.showAvatar || style.showDisplayName || style.showHandle || style.showTimestamp;
-  const headerHeight = headerVisible ? Math.max(style.showAvatar ? style.avatarSize : 0, 46) + 12 : 0;
-  const engagementHeight = style.showEngagement ? 42 : 8;
+  const headerHeight = headerVisible
+    ? Math.max(style.showAvatar ? style.avatarSize : 0, postType === "instagram" ? 38 : 46) + (postType === "instagram" ? 14 : 12)
+    : 0;
+  const engagementHeight = style.showEngagement ? (postType === "facebook" ? 50 : 42) : 8;
   const bodyHeight = Math.max(style.bodySize * 1.35, lines.length * style.bodySize * 1.35);
-  // Cap height so huge comments cannot exceed browser/WebGPU texture limits.
   const height = Math.min(2048, style.padding * 2 + headerHeight + bodyHeight + engagementHeight);
   canvas.width = (width + shadowMargin * 2) * pixelRatio;
   canvas.height = (height + shadowMargin * 2) * pixelRatio;
@@ -90,6 +92,11 @@ export function renderCardSurface(comment: CommentRecord, style: CardStyle, canv
     context.arc(left + style.avatarSize / 2, top + style.avatarSize / 2, style.avatarSize / 2, 0, Math.PI * 2);
     context.fillStyle = comment.avatarColor;
     context.fill();
+    if (postType === "instagram") {
+      context.lineWidth = 3;
+      context.strokeStyle = "#D946EF";
+      context.stroke();
+    }
     context.fillStyle = "rgba(255,255,255,.9)";
     context.font = `700 ${Math.round(style.avatarSize * 0.38)}px Inter, ui-sans-serif, system-ui, sans-serif`;
     context.textAlign = "center";
@@ -101,28 +108,48 @@ export function renderCardSurface(comment: CommentRecord, style: CardStyle, canv
   context.textBaseline = "alphabetic";
   const textLeft = left + (style.showAvatar ? style.avatarSize + 13 : 0);
   if (style.showDisplayName) {
-    context.fillStyle = "#171713";
+    context.fillStyle = postType === "facebook" ? "#18243A" : "#171713";
     context.font = `${style.displayNameWeight} ${Math.max(14, style.bodySize - 2)}px Inter, ui-sans-serif, system-ui, sans-serif`;
     context.fillText(comment.username, textLeft, top + 20);
   }
-  const metadata = [style.showHandle ? comment.handle : "", style.showTimestamp ? comment.timestamp : ""].filter(Boolean).join(" · ");
+  const metadataParts = postType === "facebook"
+    ? [style.showTimestamp ? comment.timestamp : "", style.showHandle ? comment.handle : ""]
+    : [style.showHandle ? comment.handle : "", style.showTimestamp ? comment.timestamp : ""];
+  const metadata = metadataParts.filter(Boolean).join(" · ");
   if (metadata) {
     context.fillStyle = "#77746C";
     context.font = `500 ${Math.max(12, style.bodySize - 5)}px Inter, ui-sans-serif, system-ui, sans-serif`;
     context.fillText(metadata, textLeft, top + (style.showDisplayName ? 42 : 24));
   }
 
-  context.fillStyle = "#22221E";
-  context.font = `500 ${style.bodySize}px Inter, ui-sans-serif, system-ui, sans-serif`;
+  context.fillStyle = postType === "facebook" ? "#1C1E21" : "#22221E";
+  context.font = `${postType === "instagram" ? 450 : 500} ${style.bodySize}px Inter, ui-sans-serif, system-ui, sans-serif`;
   lines.forEach((line, index) => context.fillText(line, left, top + headerHeight + 18 + index * style.bodySize * 1.35));
 
   if (style.showEngagement) {
     const engagementY = height + shadowMargin - style.padding + 2;
-    context.fillStyle = "#77746C";
+    context.fillStyle = postType === "facebook" ? "#58606B" : "#77746C";
     context.font = `500 ${Math.max(12, style.bodySize - 5)}px Inter, ui-sans-serif, system-ui, sans-serif`;
-    context.fillText(`○  ${comment.replies}`, left, engagementY);
-    context.fillText(`↻  ${comment.reposts}`, left + contentWidth * 0.34, engagementY);
-    context.fillText(`♡  ${comment.likes}`, left + contentWidth * 0.68, engagementY);
+    if (postType === "instagram") {
+      context.fillStyle = "#1A1A18";
+      context.fillText(`♡  ${comment.likes}`, left, engagementY);
+      context.fillText(`○  ${comment.replies}`, left + contentWidth * 0.35, engagementY);
+      context.fillText("⌁", left + contentWidth * 0.72, engagementY);
+    } else if (postType === "facebook") {
+      context.strokeStyle = "rgba(88, 96, 107, .22)";
+      context.lineWidth = 1;
+      context.beginPath();
+      context.moveTo(left, engagementY - 27);
+      context.lineTo(left + contentWidth, engagementY - 27);
+      context.stroke();
+      context.fillText(`Like  ${comment.likes}`, left, engagementY);
+      context.fillText(`Comment  ${comment.replies}`, left + contentWidth * 0.38, engagementY);
+      context.fillText(`Share  ${comment.reposts}`, left + contentWidth * 0.76, engagementY);
+    } else {
+      context.fillText(`○  ${comment.replies}`, left, engagementY);
+      context.fillText(`↻  ${comment.reposts}`, left + contentWidth * 0.34, engagementY);
+      context.fillText(`♡  ${comment.likes}`, left + contentWidth * 0.68, engagementY);
+    }
   }
 
   return canvas;

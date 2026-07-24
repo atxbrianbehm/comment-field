@@ -21,6 +21,8 @@ export interface CardMaterial extends THREE.Material {
     lightAmbient: MutableUniformNode;
     lightIntensity: MutableUniformNode;
     lightEdge: MutableUniformNode;
+    wobbleBend: MutableUniformNode;
+    cardHeight: MutableUniformNode;
   };
   cardTextures: MutableTextureNode[];
   cardEffectMode: boolean;

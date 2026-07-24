@@ -2,9 +2,11 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import * as TSL from "three/tsl";
 import composeCardSource from "./shaders/card-composite.wgsl?raw";
 import composeBasicCardSource from "./shaders/card-basic.wgsl?raw";
+import cardWobbleSource from "./shaders/card-wobble.wgsl?raw";
 
 const composeCard = TSL.wgslFn(composeCardSource);
 const composeBasicCard = TSL.wgslFn(composeBasicCardSource);
+const deformCard = TSL.wgslFn(cardWobbleSource);
 
 export function createCardMaterial(texture, effects = false) {
   const opacity = TSL.uniform(1);
@@ -23,6 +25,8 @@ export function createCardMaterial(texture, effects = false) {
   const lightAmbient = TSL.uniform(1);
   const lightIntensity = TSL.uniform(0);
   const lightEdge = TSL.uniform(0);
+  const wobbleBend = TSL.uniform(0);
+  const cardHeight = TSL.uniform(1);
   const cardUv = TSL.uv();
   const spread = blur.mul(0.0016);
   const center = TSL.texture(texture, cardUv);
@@ -75,6 +79,12 @@ export function createCardMaterial(texture, effects = false) {
   const material = new MeshBasicNodeMaterial({ transparent: true, depthTest: true, depthWrite: false });
   material.colorNode = composed.rgb;
   material.opacityNode = composed.a;
+  material.positionNode = deformCard({
+    local_position: TSL.positionLocal,
+    card_uv: cardUv,
+    bend: wobbleBend,
+    card_height: cardHeight,
+  });
   material.alphaTest = 0.01;
   material.cardUniforms = {
     opacity,
@@ -93,6 +103,8 @@ export function createCardMaterial(texture, effects = false) {
     lightAmbient,
     lightIntensity,
     lightEdge,
+    wobbleBend,
+    cardHeight,
   };
   material.cardTextures = samples;
   material.cardEffectMode = effects;

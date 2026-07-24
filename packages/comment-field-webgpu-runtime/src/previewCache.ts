@@ -30,7 +30,7 @@ function hashString(value: string) {
  * Bump when entrance/layout evaluation or preview pixel orientation changes without a
  * matching project-data change. Stale IDB frames would otherwise play inverted/old motion.
  */
-export const PREVIEW_CACHE_EVAL_VERSION = 14;
+export const PREVIEW_CACHE_EVAL_VERSION = 16;
 
 export function createPreviewCacheKey(
   composition: Composition,
@@ -49,7 +49,13 @@ export function createPreviewCacheKey(
       frameRate: composition.frameRate,
       seed: composition.seed,
       backgroundColor: composition.backgroundColor,
-      backgroundImage: composition.backgroundImage,
+      backgroundPlate: composition.backgroundPlate && {
+        source: composition.backgroundPlate.source,
+        mediaType: composition.backgroundPlate.mediaType,
+        visible: composition.backgroundPlate.visible,
+        opacity: composition.backgroundPlate.opacity,
+        fit: composition.backgroundPlate.fit,
+      },
       cards: composition.cards,
       camera: composition.camera,
       fieldBounds: composition.fieldBounds,

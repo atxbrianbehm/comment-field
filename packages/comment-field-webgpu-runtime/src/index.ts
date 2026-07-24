@@ -1,3 +1,4 @@
+export * from "./backgroundPlate";
 export * from "./cardCache";
 export * from "./cardRasterService";
 export * from "./cardMaterial.js";

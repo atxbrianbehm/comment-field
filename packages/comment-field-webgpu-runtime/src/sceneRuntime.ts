@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   compositionWorldDimensions,
+  evaluateCardWobble,
   evaluateScene,
   fieldPointToWorld,
   projectWorldPoint,
@@ -23,6 +24,11 @@ import { createPerformanceTelemetry, type PerformanceTelemetryRecorder, type Per
 import { computeCardMotionBlur } from "./motionBlur";
 import { packReadbackPixels } from "./previewCache";
 import { createShadowMaterial, setShadowMaterialTexture, type ShadowMaterial } from "./shadowMaterial.js";
+import {
+  seekSceneBackground,
+  syncSceneBackgroundTime,
+  type BackgroundPlateRuntime,
+} from "./backgroundPlate.js";
 
 export interface RuntimeCacheStatus {
   state: "ready" | "rebuilding";
@@ -89,6 +95,7 @@ export interface SceneController {
   rasterizer: CardRasterService;
   canvasPixelRatio: number;
   cardTexturePixelRatio: number;
+  backgroundPlate: BackgroundPlateRuntime | null;
 }
 
 export async function createSceneController(options: { canvasPixelRatio?: number; cardTexturePixelRatio?: number } = {}) {
@@ -105,7 +112,7 @@ export async function createSceneController(options: { canvasPixelRatio?: number
   const shadows = new THREE.Group();
   const cards = new THREE.Group();
   scene.add(shadows, cards);
-  return { renderer, scene, camera, shadows, cards, shadowMeshes: new Map(), meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null, telemetry: createPerformanceTelemetry(), rasterizer: new CardRasterService(), canvasPixelRatio, cardTexturePixelRatio } satisfies SceneController;
+  return { renderer, scene, camera, shadows, cards, shadowMeshes: new Map(), meshes: new Map(), cache: new Map(), frameWidth: 0, frameHeight: 0, exporting: false, previewTarget: null, encodeCanvas: null, telemetry: createPerformanceTelemetry(), rasterizer: new CardRasterService(), canvasPixelRatio, cardTexturePixelRatio, backgroundPlate: null } satisfies SceneController;
 }
 
 export function getSceneTelemetry(controller: SceneController): PerformanceTelemetrySnapshot {
@@ -122,6 +129,8 @@ function ensureShadowLayer(controller: SceneController) {
 
 export function disposeSceneController(controller: SceneController) {
   ensureShadowLayer(controller);
+  controller.backgroundPlate?.dispose();
+  controller.backgroundPlate = null;
   controller.previewTarget?.dispose();
   controller.rasterizer.dispose();
   controller.cache.forEach(({ texture }) => texture.dispose());
@@ -152,7 +161,7 @@ export async function renderPngBlob(
   overviewCamera: CameraPose,
   width: number,
   height: number,
-  options: { transparent?: boolean; soloCardIds?: string[] | null } = {},
+  options: { transparent?: boolean; omitBackgroundPlate?: boolean; soloCardIds?: string[] | null } = {},
 ) {
   const temporaryExport = !controller.exporting;
   if (temporaryExport) {
@@ -160,11 +169,13 @@ export async function renderPngBlob(
     controller.renderer.setSize(width, height, false);
   }
   const previousBackground = controller.scene.background;
-  if (options.transparent) controller.scene.background = null;
+  const omitBackground = Boolean(options.transparent || options.omitBackgroundPlate);
+  if (omitBackground) controller.scene.background = null;
   const renderInput: SceneRenderInput = options.soloCardIds?.length
     ? { ...input, soloCardIds: options.soloCardIds }
     : input;
   try {
+    if (!omitBackground) await seekSceneBackground(controller, renderInput.time);
     renderScene(controller, renderInput, overviewCamera, {
       clean: true,
       production: true,
@@ -176,7 +187,7 @@ export async function renderPngBlob(
     ));
     return blob;
   } finally {
-    if (options.transparent) controller.scene.background = previousBackground;
+    if (omitBackground) controller.scene.background = previousBackground;
     if (temporaryExport) resizeScene(controller, controller.frameWidth, controller.frameHeight);
   }
 }
@@ -317,6 +328,7 @@ function fieldOverlay(controller: SceneController, input: SceneRenderInput, outp
 
 export function renderScene(controller: SceneController, input: SceneRenderInput, overviewCamera: CameraPose, options: { target?: THREE.RenderTarget | null; clean?: boolean; production?: boolean; transparentBackground?: boolean } = {}) {
   const startedAt = performance.now();
+  syncSceneBackgroundTime(controller, input.time);
   ensureShadowLayer(controller);
   const dimensions = compositionWorldDimensions(input.composition);
   const entrance = input.take.entranceOverride ?? input.entranceMotion;
@@ -411,6 +423,10 @@ export function renderScene(controller: SceneController, input: SceneRenderInput
     mesh.material.cardUniforms.lightAmbient.value = lighting.enabled ? lighting.ambient : 1;
     mesh.material.cardUniforms.lightIntensity.value = lighting.enabled ? lighting.intensity : 0;
     mesh.material.cardUniforms.lightEdge.value = lighting.enabled ? lighting.edge : 0;
+    mesh.material.cardUniforms.wobbleBend.value = layoutEdit
+      ? 0
+      : evaluateCardWobble(input.renderSettings.cardWobble, input.composition.seed, card.cardId, input.time);
+    mesh.material.cardUniforms.cardHeight.value = mesh.geometry.parameters.height;
     // Keep selected cards painted (and hit-tested) above overlaps.
     const selectedBoost = isSelected ? (card.cardId === input.selectedCardId ? 500_000 : 400_000) : 0;
     mesh.renderOrder = card.layerPriority + selectedBoost;
@@ -719,7 +735,10 @@ export function syncSceneAssets(controller: SceneController, input: Pick<SceneRe
       const rendered = createCardTextureFromSource(raster.source, raster.width, raster.height);
       rendered.texture.addEventListener("dispose", raster.dispose);
       const planeWidth = Math.min(dimensions.width * 0.24, 1.2);
-      const geometry = new THREE.PlaneGeometry(planeWidth, planeWidth / rendered.aspect);
+      // Transform Scatter's leaf deformation uses a small regular grid. Six by
+      // eight segments are enough for a soft bend without meaningfully changing
+      // the cost of a 30-card field.
+      const geometry = new THREE.PlaneGeometry(planeWidth, planeWidth / rendered.aspect, 6, 8);
       const shadowGeometry = new THREE.PlaneGeometry(planeWidth, planeWidth / rendered.aspect);
       const existing = controller.meshes.get(placement.cardId);
       if (existing) { existing.geometry.dispose(); existing.geometry = geometry; setCardMaterialTexture(existing.material, rendered.texture); }
@@ -747,23 +766,13 @@ export function syncSceneAssets(controller: SceneController, input: Pick<SceneRe
   return { signatures: { style, comments: commentsSignature, cards }, cancel: () => { cancelled = true; if (frame !== null) cancelAnimationFrame(frame); } };
 }
 
-export function setSceneBackground(controller: SceneController, source: string | undefined, onReady: () => void) {
-  let texture: THREE.Texture | null = null;
-  let cancelled = false;
-  if (!source) { controller.scene.background = null; onReady(); return () => undefined; }
-  new THREE.TextureLoader().load(source, (loaded) => {
-    if (cancelled) { loaded.dispose(); return; }
-    texture = loaded; loaded.colorSpace = THREE.SRGBColorSpace; controller.scene.background = loaded; onReady();
-  });
-  return () => { cancelled = true; if (controller.scene.background === texture) controller.scene.background = null; texture?.dispose(); };
-}
-
 export async function renderPreviewBlob(controller: SceneController, input: SceneRenderInput, overviewCamera: CameraPose, width: number, height: number, quality: number) {
   let target = controller.previewTarget;
   if (!target || target.width !== width || target.height !== height) {
     target?.dispose(); target = new THREE.RenderTarget(width, height, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, type: THREE.UnsignedByteType, depthBuffer: true });
     target.texture.colorSpace = THREE.SRGBColorSpace; controller.previewTarget = target;
   }
+  await seekSceneBackground(controller, input.time);
   renderScene(controller, { ...input, time: input.time }, overviewCamera, { target, clean: true, production: true });
   const readbackStartedAt = performance.now();
   const pixels = await controller.renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height) as Uint8Array;

@@ -287,22 +287,48 @@ export function usePreviewPlayback(input: PreviewPlaybackInput) {
 
   function scrubTo(value: number) {
     pausePlayback();
-    playheadRef.current = value;
-    setTime(value);
-    sceneRef.current?.renderLiveFrame(value);
+    // Playhead is always inside [0, Out]. Use the live take duration so a stale
+    // closure cannot open a longer scrub range after Out is shortened.
+    const shotEnd = take.duration ?? duration;
+    const clamped = Math.max(0, Math.min(shotEnd, value));
+    playheadRef.current = clamped;
+    setTime(clamped);
+    sceneRef.current?.renderLiveFrame(clamped);
   }
 
   function changeTakeDuration(value: number) {
     pausePlayback();
     const snapped = Math.max(1 / composition.frameRate, Math.round(value * composition.frameRate) / composition.frameRate);
-    mutateTake((draft) => { draft.duration = snapped; });
+    mutateTake((draft) => {
+      draft.duration = snapped;
+      // Keep authored timing events inside the new shot so the timeline cannot
+      // balloon to leftover keys, triggers, or a burst cue from an older length.
+      if (draft.population.postHeroBurstStartTime > snapped) {
+        draft.population.postHeroBurstStartTime = Math.max(0, snapped - draft.population.postHeroBurstDuration);
+      }
+      draft.cardTriggers = draft.cardTriggers.map((trigger) => (
+        trigger.triggerTime > snapped ? { ...trigger, triggerTime: snapped } : trigger
+      ));
+      draft.gestureSamples = draft.gestureSamples.map((sample) => (
+        sample.time > snapped ? { ...sample, time: snapped } : sample
+      ));
+      draft.cameraKeyframes = draft.cameraKeyframes.map((keyframe) => (
+        keyframe.time > snapped ? { ...keyframe, time: snapped } : keyframe
+      ));
+      if (draft.hero?.keyframes) {
+        draft.hero.keyframes = draft.hero.keyframes.map((keyframe) => (
+          keyframe.time > snapped ? { ...keyframe, time: snapped } : keyframe
+        ));
+      }
+    });
     if (playheadRef.current > snapped) scrubTo(snapped);
   }
 
   function setPlayhead(value: number) {
     pausePlayback();
-    playheadRef.current = value;
-    setTime(value);
+    const clamped = Math.max(0, Math.min(duration, value));
+    playheadRef.current = clamped;
+    setTime(clamped);
   }
 
   useEffect(() => {
